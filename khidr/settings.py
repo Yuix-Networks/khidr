@@ -557,18 +557,37 @@ if SENTRY_DSN:
 # Orchestrator
 # ---------------------------------------------------------------------------
 
-HEARTBEAT_TIMEOUT_SECONDS = 1800  # 30 min
-SUMMARIZE_THRESHOLD = 20000
+HEARTBEAT_TIMEOUT_SECONDS = int(env("HEARTBEAT_TIMEOUT_SECONDS", "1800"))
+SUMMARIZE_THRESHOLD = int(env("SUMMARIZE_THRESHOLD", "20000"))
 
 # Minimum delay between re-dispatches of the same task to its assigned agent
 # after a "finished without Review" session. Stops rapid-fire requeue loops
 # when a model keeps ending its stream without calling tools.
-REQUEUE_COOLDOWN_SECONDS = 300  # 5 min
+REQUEUE_COOLDOWN_SECONDS = int(env("REQUEUE_COOLDOWN_SECONDS", "300"))
+
+# Where Khidr keeps its git caches, task workspaces, per-run files and the
+# agents' home directories (CLI logins).
+KHIDR_DATA_DIR = Path(env("KHIDR_DATA_DIR", str(BASE_DIR / "data"))).expanduser()
+
+# Default sandbox for agents that don't pick one: "docker" (a fresh container
+# per run) or "local" (run the CLI directly on this host — no isolation).
+KHIDR_SANDBOX = env("KHIDR_SANDBOX", "docker")
+KHIDR_SANDBOX_IMAGE = env("KHIDR_SANDBOX_IMAGE", "khidr-sandbox:latest")
+
+# How a sandboxed agent reaches this Khidr instance (the /mcp/ endpoint).
+# From Docker, localhost/127.0.0.1 is rewritten to host.docker.internal.
+KHIDR_INTERNAL_URL = env("KHIDR_INTERNAL_URL", "http://127.0.0.1:8000").rstrip("/")
+
+# Turn budget per run, and how long an agent rests after its provider reports
+# a rate or usage limit (subscriptions reset in windows of a few hours).
+KHIDR_MAX_TURNS = int(env("KHIDR_MAX_TURNS", "200"))
+KHIDR_RATE_LIMIT_COOLDOWN_SECONDS = int(env("KHIDR_RATE_LIMIT_COOLDOWN_SECONDS", "1800"))
 
 # ---------------------------------------------------------------------------
 # Web login (simple single-user auth for chat UI)
 # ---------------------------------------------------------------------------
 
+# bcrypt hash of the web UI password: `python manage.py set_password`.
 WEB_PASSWORD_HASH = env("WEB_PASSWORD_HASH", "")
 
 # Root URL for building chat links in notifications / card descriptions.
