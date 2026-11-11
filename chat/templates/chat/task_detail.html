@@ -1,0 +1,123 @@
+{% extends "chat/base.html" %}
+{% load static %}
+{% block title %}{{ task.title|truncatechars:40 }} · Khidr{% endblock %}
+{% block body_class %}chat-page{% endblock %}
+{% block content %}
+<div class="chat-wrap"
+     data-task-id="{{ task.id }}"
+     data-status="{{ task.status }}"
+     data-waiting="{{ task.waiting_for_user|yesno:"1,0" }}">
+
+  <section class="chat-head">
+    <div class="left">
+      <a class="back" href="/projects/{{ task.project.id }}/">← {{ task.project.name }}</a>
+      <h1>{{ task.title }}</h1>
+      <div class="sub">
+        <span class="pill status" data-js="status-pill">{{ task.get_status_display }}</span>
+        <span class="pill created" title="Açılış tarihi">📅 {{ task.created_at|date:"d.m.Y H:i" }}</span>
+        <span class="pill">c{{ task.complexity }}</span>
+        <span class="pill project">{{ task.project.name }}</span>
+        <span class="pill agent" data-js="agent-pill">
+          {% if task.current_agent %}🤖 {{ task.current_agent.slug }}
+          {% elif task.assigned_agent %}assigned: {{ task.assigned_agent.slug }}
+          {% else %}—{% endif %}
+        </span>
+        {% if task.branch_name %}<span class="pill branch" data-js="branch-pill">branch: {{ task.branch_name }}</span>{% endif %}
+        <span class="pill context" data-js="context-pill">context: —</span>
+        <span class="pill agent-status" data-js="agent-status-pill">⏸ bekliyor</span>
+      </div>
+    </div>
+    <div class="right">
+      <div class="row-end" style="margin-top: 8px;">
+        {% if task.status == 'done' %}<button type="button" class="btn approve small" data-js="approve-btn" disabled>✓ Approved</button>{% else %}<button type="button" class="btn approve small" data-js="approve-btn">✓ Approve</button>{% endif %}
+        <button type="button" class="btn ghost small" data-js="close-and-create-btn">📋 Kapat + Yeni İş</button>
+        <button type="button" class="btn ghost small" data-js="edit-btn">✎ Düzenle</button>
+        <button type="button" class="btn danger small" data-js="delete-btn">🗑 Sil</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="chat-body">
+    <details class="agent-context">
+      <summary>Agent context (ilk prompt + system prompt)</summary>
+      <div class="ctx-block">
+        <h4>System prompt</h4>
+        <pre>{{ system_prompt }}</pre>
+      </div>
+      <div class="ctx-block">
+        <h4>İlk mesajlar (agent'a geçen)</h4>
+        {% for m in initial_messages %}
+          <div class="ctx-msg ctx-{{ m.role }}">
+            <div class="ctx-role">{{ m.role }}</div>
+            <pre>{{ m.content }}</pre>
+          </div>
+        {% endfor %}
+      </div>
+    </details>
+    <div data-js="messages" class="messages-stream"></div>
+  </section>
+
+  <details class="chat-input-drawer">
+    <summary>
+      <span class="label">✎ Mesaj yaz</span>
+      <span class="hint" data-js="hint">{% if task.waiting_for_user %}⏸ waiting_for_user{% endif %}</span>
+    </summary>
+    <section class="chat-input">
+      <textarea data-js="input"
+                placeholder="{% if task.waiting_for_user %}Agent senden cevap bekliyor...{% else %}Mesaj yaz (Cmd/Ctrl+Enter){% endif %}"
+                rows="3"></textarea>
+      <div class="row">
+        <span class="hint-inline muted">Cmd/Ctrl+Enter gönderir</span>
+        <button type="button" class="btn" data-js="send-btn">Gönder</button>
+      </div>
+    </section>
+  </details>
+</div>
+
+<dialog data-js="edit-dialog" class="modal wide">
+  <form method="dialog">
+    <h3>Task düzenle</h3>
+    <label>Başlık<input type="text" data-js="e-title" required value="{{ task.title }}"></label>
+    <label>Açıklama<textarea data-js="e-desc" rows="5">{{ task.description }}</textarea></label>
+    <div class="row gap">
+      <label>Complexity
+        <select data-js="e-cpx">
+          {% for n in "12345" %}
+            <option value="{{ n }}"{% if task.complexity|stringformat:"s" == n %} selected{% endif %}>{{ n }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Agent
+        <select data-js="e-agent">
+          <option value="">— boş (dispatcher seçer) —</option>
+          {% for a in project_agents %}
+            <option value="{{ a.slug }}"{% if task.assigned_agent_id == a.id %} selected{% endif %}>{{ a.slug }} (t{{ a.talent }})</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="row-end">
+      <button type="button" class="btn ghost" data-js="edit-cancel">İptal</button>
+      <button type="button" class="btn" data-js="edit-submit">Kaydet</button>
+    </div>
+    <p class="err" data-js="edit-err"></p>
+  </form>
+</dialog>
+
+<dialog data-js="close-and-create-dialog" class="modal">
+  <form method="dialog">
+    <h3>Kapat ve yeni iş aç</h3>
+    <p class="muted" style="margin-bottom:16px;">Mevcut iş Done'a taşınacak, sohbet özetlenip yeni bir işe açıklama olarak eklenecek.</p>
+    <label>Yeni iş başlığı<input type="text" data-js="cac-title" placeholder="Örn: Testleri düzelt ve deploy et" required></label>
+    <div class="row-end" style="margin-top:16px;">
+      <button type="button" class="btn ghost" data-js="cac-cancel">İptal</button>
+      <button type="button" class="btn" data-js="cac-submit">Aç</button>
+    </div>
+    <p class="err" data-js="cac-err"></p>
+  </form>
+</dialog>
+
+{{ messages_payload|json_script:"initial-messages" }}
+<script>window.KHIDR = { csrfToken: "{{ csrf_token }}", taskId: {{ task.id }} };</script>
+<script src="{% static 'chat/chat.js' %}?v={{ TIME_VERSION }}"></script>
+{% endblock %}

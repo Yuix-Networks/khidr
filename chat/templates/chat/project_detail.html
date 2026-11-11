@@ -1,0 +1,94 @@
+{% extends "chat/base.html" %}
+{% load static %}
+{% block title %}{{ project.name }} · Khidr{% endblock %}
+{% block content %}
+<div class="projects">
+  <section class="project" data-project-id="{{ project.id }}">
+    <header class="project-head">
+      <div>
+        <a class="back" href="/">← projeler</a>
+        <h2>{{ project.name }}</h2>
+        {% if project.description %}<p class="muted" style="margin: 4px 0 0;">{{ project.description|truncatechars:200 }}</p>{% endif %}
+      </div>
+      <div class="project-meta">
+        {% if project.repo_path %}<span class="pill branch">{{ project.repo_path }}</span>{% endif %}
+        <button type="button" class="btn" data-js="new-task-btn" data-project-id="{{ project.id }}">+ Yeni task</button>
+      </div>
+    </header>
+
+    <div class="board" data-js="board" data-project-id="{{ project.id }}">
+      {% for col in columns %}
+        <div class="col col-{{ col.status }}" data-status="{{ col.status }}">
+          <h3>{{ col.label }} <span class="count" data-js="col-count">{{ col.tasks|length }}</span></h3>
+          <ul data-js="col-list">
+            {% for t in col.tasks %}
+              <li class="card c-{{ t.complexity }}" data-task-id="{{ t.id }}">
+                <button type="button" class="card-del" data-js="del-card"
+                        data-task-id="{{ t.id }}" title="Sil">×</button>
+                <a href="/tasks/{{ t.id }}/">
+                  <span class="title">{{ t.title|truncatechars:80 }}</span>
+                  <span class="meta">
+                    <span class="cpx" title="complexity">c{{ t.complexity }}</span>
+                    {% if t.current_agent %}<span class="agent" title="agent">{{ t.current_agent.slug }}</span>{% endif %}
+                    {% if t.assigned_agent and not t.current_agent %}<span class="agent assigned" title="assigned">{{ t.assigned_agent.slug }}</span>{% endif %}
+                    {% if t.waiting_for_user %}<span class="wait" title="waiting for user">⏸</span>{% endif %}
+                    <time class="ago" datetime="{{ t.created_at|date:'c' }}" title="{{ t.created_at|date:'Y-m-d H:i' }}">{{ t.created_at|timesince }}</time>
+                  </span>
+                </a>
+                {% if t.status == 'review' %}
+                  <button type="button" class="btn card-approve" data-js="approve-btn"
+                          data-task-id="{{ t.id }}" title="Done'a taşı">✓ Approve</button>
+                {% endif %}
+                {% if t.status == 'backlog' %}
+                  <button type="button" class="btn card-todo" data-js="todo-btn"
+                          data-task-id="{{ t.id }}" title="Todo'ya taşı">→ Todo</button>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endfor %}
+    </div>
+
+    <template data-js="agents-for-{{ project.id }}">
+      <option value="">— boş (dispatcher seçer) —</option>
+      {% for a in agents %}
+        <option value="{{ a.slug }}">{{ a.slug }} (t{{ a.talent }}, p{{ a.priority }})</option>
+      {% endfor %}
+    </template>
+  </section>
+</div>
+
+<dialog data-js="new-task-dialog" class="modal wide">
+  <form method="dialog">
+    <h3>Yeni task</h3>
+    <label>Başlık<input type="text" data-js="t-title" required></label>
+    <label>Açıklama<textarea data-js="t-desc" rows="5"></textarea></label>
+    <div class="row gap">
+      <label>Complexity
+        <select data-js="t-cpx">
+          <option value="1">1</option><option value="2">2</option>
+          <option value="3" selected>3</option>
+          <option value="4">4</option><option value="5">5</option>
+        </select>
+      </label>
+      <label>Status
+        <select data-js="t-status">
+          <option value="backlog">Backlog</option>
+          <option value="todo" selected>Todo</option>
+        </select>
+      </label>
+      <label>Agent (opsiyonel)
+        <select data-js="t-agent"></select>
+      </label>
+    </div>
+    <div class="row-end">
+      <button type="button" class="btn ghost" data-js="new-task-cancel">İptal</button>
+      <button type="button" class="btn" data-js="new-task-submit">Oluştur</button>
+    </div>
+  </form>
+</dialog>
+
+<script>window.KHIDR = { csrfToken: "{{ csrf_token }}" };</script>
+<script src="{% static 'chat/task_list.js' %}?v={{ TIME_VERSION }}"></script>
+{% endblock %}

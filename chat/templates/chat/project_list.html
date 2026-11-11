@@ -1,0 +1,61 @@
+{% extends "chat/base.html" %}
+{% load static %}
+{% block title %}Projeler · Khidr{% endblock %}
+{% block content %}
+<div class="project-list">
+  <div class="project-list-head">
+    <h2>Projeler <span class="count">{{ projects|length }}</span></h2>
+    <div class="pl-tools">
+      <input type="search" class="pl-filter" data-js="p-filter" placeholder="Ara…  ( / )" autocomplete="off" aria-label="Projelerde ara">
+      <button type="button" class="btn small" data-js="new-project-btn">+ Yeni proje</button>
+    </div>
+  </div>
+
+  <div class="project-cards" data-js="p-cards">
+    {% for p in projects %}
+      <a class="project-card{% if p.in_progress %} is-live{% endif %}{% if p.waiting %} is-waiting{% endif %}" href="/projects/{{ p.id }}/"
+         data-name="{{ p.name|lower }} {{ p.description|default:''|lower|truncatechars:300 }}">
+        <div class="pc-head">
+          <h3>{{ p.name }}</h3>
+          <span class="pc-total" title="toplam task">{{ p.total }}</span>
+        </div>
+        {% if p.description %}<p class="pc-desc" title="{{ p.description }}">{{ p.description }}</p>{% endif %}
+        <div class="pc-stats">
+          {% if p.in_progress %}<span class="pill live" title="in progress">● {{ p.in_progress }}</span>{% endif %}
+          {% if p.review %}<span class="pill review" title="review">review {{ p.review }}</span>{% endif %}
+          {% if p.todo %}<span class="pill" title="todo">todo {{ p.todo }}</span>{% endif %}
+          {% if p.waiting %}<span class="pill warn" title="waiting for user">⏸ {{ p.waiting }}</span>{% endif %}
+          {% if not p.in_progress and not p.review and not p.todo and not p.waiting %}<span class="pc-idle">boşta</span>{% endif %}
+        </div>
+      </a>
+    {% empty %}
+      <p class="muted empty-state">
+        Henüz proje yok — sağ üstten <strong>+ Yeni proje</strong> ile veya CLI'dan oluştur:
+        <code>python manage.py create_project "Ad" "açıklama"</code>
+      </p>
+    {% endfor %}
+    <p class="muted empty-state" data-js="p-nomatch" hidden>Eşleşen proje yok.</p>
+  </div>
+</div>
+
+<dialog data-js="new-project-dialog" class="modal wide">
+  <form method="dialog">
+    {% csrf_token %}
+    <h3>Yeni proje</h3>
+    <label>İsim<input type="text" data-js="p-name" required placeholder="Acme"></label>
+    <label>Açıklama<textarea data-js="p-desc" rows="6" placeholder="Proje ne yapar, hangi teknolojileri kullanır"></textarea></label>
+    <p class="muted hint">
+      Oluşunca <code>projects/&lt;slug&gt;/project.md</code> otomatik şablonla tohumlanır.
+      Admin'den <code>repo_path</code> ve agent bağlantılarını yap.
+    </p>
+    <p class="err" data-js="p-err"></p>
+    <div class="row-end">
+      <button type="button" class="btn ghost" data-js="p-cancel">İptal</button>
+      <button type="button" class="btn" data-js="p-submit">Oluştur</button>
+    </div>
+  </form>
+</dialog>
+
+<script>window.KHIDR = { csrfToken: "{{ csrf_token }}" };</script>
+<script src="{% static 'chat/project_list.js' %}?v={{ TIME_VERSION }}"></script>
+{% endblock %}

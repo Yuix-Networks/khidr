@@ -1,0 +1,28 @@
+# Core
+Django>=6.1,<6.2
+djangorestframework>=3.18
+python-dotenv>=1.2.4
+psycopg[binary]>=3.3.8  # Django 5.1+ supports psycopg 3 natively
+
+# HTTP
+httpx>=0.28.1
+beautifulsoup4>=4.15       # HTML → text for web_fetch
+ddgs>=9.16                  # free DuckDuckGo search for web_search
+
+# Config
+PyYAML>=6.0
+
+# Real-time (chat UI, later)
+channels>=4.3.2
+daphne>=4.2.3
+whitenoise>=6.12       # static file serving inside the Django app (no nginx)
+
+# Auth
+passlib[bcrypt]>=1.7.4
+
+# Agents
+claude-agent-sdk>=0.2.179  # agent harness; wheel bundles the Claude Code CLI
+
+# Observability
+sentry-sdk>=2.74
+gunicorn==26.2.0

@@ -1,0 +1,40 @@
+.python-version
+.claude
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+
+# Env
+.env
+.env.local
+
+# Data (but keep the MCP config staging dir tracked as empty)
+data/*
+!data/.gitkeep
+!data/mcp/
+data/mcp/*
+!data/mcp/.gitkeep
+
+# Deploy md5 caches
+requirements.txt.md5sum
+.container-pip.md5
+.env.md5
+
+# Personal agent config (use agents.yaml.example as template)
+agents.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+staticfiles/
+.python-version
+.claude/

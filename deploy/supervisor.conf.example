@@ -1,0 +1,41 @@
+; Supervisor config for khidr.
+; Copy to /etc/supervisor/conf.d/khidr.conf and adjust paths and user.
+
+[program:khidr]
+command=/opt/khidr/.venv/bin/python manage.py run_orchestrator --tick 5
+directory=/opt/khidr
+autostart=true
+autorestart=true
+startsecs=5
+startretries=10
+stopsignal=TERM
+stopwaitsecs=15
+stderr_logfile=/var/log/khidr.err.log
+stdout_logfile=/var/log/khidr.out.log
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=5
+stderr_logfile_maxbytes=10MB
+stderr_logfile_backups=5
+user=khidr
+environment=DJANGO_SETTINGS_MODULE="khidr.settings",PYTHONUNBUFFERED="1"
+
+[program:khidr-web]
+; Daphne (ASGI) — required for Channels WebSocket consumers (reactive
+; kanban + chat streams). Was gunicorn WSGI earlier which silently
+; dropped the /ws/ routes.
+command=/opt/khidr/.venv/bin/daphne -b 0.0.0.0 -p 8000 --access-log - khidr.asgi:application
+directory=/opt/khidr
+autostart=true
+autorestart=true
+startsecs=5
+startretries=10
+stopsignal=TERM
+stopwaitsecs=15
+stderr_logfile=/var/log/khidr-web.err.log
+stdout_logfile=/var/log/khidr-web.out.log
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=5
+stderr_logfile_maxbytes=10MB
+stderr_logfile_backups=5
+user=khidr
+environment=DJANGO_SETTINGS_MODULE="khidr.settings",PYTHONUNBUFFERED="1"

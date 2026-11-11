@@ -1,0 +1,30 @@
+# Agent havuzu. Her agent birden fazla projeye atanabilir.
+# type: claude-agent-sdk  (base_url = Anthropic Messages API-compatible endpoint)
+# role: worker (default) | summarizer | both
+
+agents:
+  - id: local-qwen
+    type: claude-agent-sdk
+    base_url: http://localhost:8000      # llama.cpp llama-server serves /v1/messages
+    model: qwen2.5-coder-32b
+    api_key_env: LOCAL_API_KEY   # opsiyonel
+    role: both
+    priority: 1                  # summarizer fallback sıralaması (düşük = öncelikli)
+    projects: [example]
+
+  - id: openrouter-claude
+    type: claude-agent-sdk
+    base_url: https://openrouter.ai/api
+    model: anthropic/claude-sonnet-4
+    api_key_env: OPENROUTER_API_KEY
+    role: worker
+    projects: [example]
+
+  - id: minimax
+    type: claude-agent-sdk
+    base_url: https://api.minimax.io/anthropic
+    model: MiniMax-M3
+    api_key_env: MINIMAX_API_KEY
+    role: both
+    priority: 2
+    projects: [example]

@@ -1,0 +1,14 @@
+{% extends "chat/base.html" %}
+{% block title %}Giriş · Khidr{% endblock %}
+{% block body_class %}login-page{% endblock %}
+{% block content %}
+<section class="login-card">
+  <h1>khidr</h1>
+  <form method="post">
+    {% csrf_token %}
+    <input type="password" name="password" placeholder="Şifre" autocomplete="current-password" autofocus required>
+    {% if error %}<p class="err">{{ error }}</p>{% endif %}
+    <button type="submit">Gir</button>
+  </form>
+</section>
+{% endblock %}
