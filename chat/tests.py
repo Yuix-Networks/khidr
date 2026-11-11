@@ -108,7 +108,7 @@ class NewTaskTelegramTests(TestCase):
         thread.call_args.kwargs["target"]()
         notify.assert_called_once()
         self.assertEqual(notify.call_args.args[0].pk, task.pk)
-        self.assertEqual(notify.call_args.args[1], "🆕 Yeni iş · Acme (Uptime Kuma)")
+        self.assertEqual(notify.call_args.args[1], "🆕 New task · Acme (Uptime Kuma)")
 
     def test_update_does_not_ping(self):
         task = Task.objects.create(project=self.project, title="Fix login")

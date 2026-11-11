@@ -1,77 +1,78 @@
-# Paylaşılan Araçlar
+# Shared Tools
 
-Elinizde iki sınıf araç var.
+You have two classes of tools.
 
-## A — Claude Code'un standart dev araçları
+## A — Claude Code's standard dev tools
 
-Agent'lar Claude Agent SDK ile çalışır; Claude Code'un yerleşik araçları
-hazır gelir (parametre açıklamaları tool şemasında):
+Agents run on the Claude Agent SDK; Claude Code's built-in tools come
+ready to use (parameter descriptions are in the tool schema):
 
-- `Bash` — shell komutu (repo dizininde çalışır; varsayılan timeout 5 dk).
-  Uzun işler (crawler, build, dev server) için `run_in_background: true`
-  ver, sonra çıktıyı oku / süreci durdur.
-- `Read` / `Write` / `Edit` — dosya oku, yaz, tek eşleşmeli değiştir
-- `Glob` — `**/*.py` tarzı dosya bulma
-- `Grep` — regex arama (ripgrep)
-- `WebFetch` — URL içeriğini oku
-- `TodoWrite` / `TaskCreate` / `TaskUpdate` / `TaskList` — kendi ilerleme
-  listeni tut. Bunlar **kanban kartı değildir**; kart için aşağıdaki
-  `create_kanbancard` / `get_kanbancard` / `search_kanbancards` kullan.
+- `Bash` — shell command (runs in the repo directory; default timeout 5 min).
+  For long jobs (crawler, build, dev server) pass `run_in_background: true`,
+  then read the output / stop the process.
+- `Read` / `Write` / `Edit` — read, write, replace a single match in a file
+- `Glob` — find files like `**/*.py`
+- `Grep` — regex search (ripgrep)
+- `WebFetch` — read a URL's content
+- `TodoWrite` / `TaskCreate` / `TaskUpdate` / `TaskList` — keep your own
+  progress list. These are **not kanban cards**; for cards use
+  `create_kanbancard` / `get_kanbancard` / `search_kanbancards` below.
 
-Yok: `AskUserQuestion` (yerine `ask_user`), `WebSearch` (yerine `web_search`),
-plan modu, worktree, alt-agent.
+Not available: `AskUserQuestion` (use `ask_user`), `WebSearch` (use `web_search`),
+plan mode, worktrees, sub-agents.
 
-## B — Orchestrator'a özel araçlar (`khidr` MCP sunucusu)
+## B — Orchestrator-specific tools (the `khidr` MCP server)
 
-Tool listesinde `mcp__khidr__<isim>` olarak görünürler (ör.
-`mcp__khidr__set_status`); aşağıda kısa isimleriyle anlatılıyor. Kanban
-kartı + proje hafızası + .env + harici servisler için bizim tarafımızı
-tetiklerler:
+They show up in the tool list as `mcp__khidr__<name>` (e.g.
+`mcp__khidr__set_status`); below they are described by their short names.
+They trigger our side for the kanban card, project memory, .env and
+external services:
 
-- Kart: `note`, `set_status`, `ask_user`, `reject_task`,
+- Card: `note`, `set_status`, `ask_user`, `reject_task`,
   `get_kanbancard`, `search_kanbancards`, `create_kanbancard`
-- Hafıza: `get_project_memory`, `add_project_memory`, `save_memory`,
+- Memory: `get_project_memory`, `add_project_memory`, `save_memory`,
   `search_memory`, `list_memories`
-- Diğer: `web_search`, `understand_image`, `get_glitchtip_issue`
+- Other: `web_search`, `understand_image`, `get_glitchtip_issue`
 
 ### `note(text)`
 
-Chat'te highlighted bir system note bırakır. İlerleme özeti, handoff,
-bitiş raporu için.
+Leaves a highlighted system note in the chat. For progress summaries,
+handoffs and completion reports.
 
 ### `set_status(status)`
 
-Mevcut kanban kartının kolonunu değiştirir.
+Changes the column of the current kanban card.
 `status ∈ {backlog, todo, in_progress, review, done}`.
-İş bittiyse `set_status("review")` çağırırsın — karta otomatik Telegram
-bildirim gider.
+When the work is done you call `set_status("review")` — a Telegram
+notification for the card goes out automatically.
 
-> `set_status("review")` / `set_status("done")` repo cleanliness guard'ından
-> geçer: uncommitted değişiklik, main dışı branch, veya push edilmemiş
-> commit varsa reddedilir. Önce temizle, sonra review'e al. Kod
-> yazmadığın işlerde bu kontrol zaten otomatik geçer.
+> `set_status("review")` / `set_status("done")` pass through a repo
+> cleanliness guard: they are rejected if there are uncommitted changes,
+> you are on a branch other than main, or there are unpushed commits.
+> Clean up first, then move to review. For work where you wrote no code
+> this check passes automatically.
 
 ### `ask_user(message)`
 
-Kullanıcıya soru sor ve **dur**. Bu çağrı:
-1. Kartı `waiting_for_user=True` moduna alır — orchestrator requeue etmez.
-2. Kullanıcıya **Telegram üzerinden anında bildirim** gönderir (chat linkiyle).
+Ask the user a question and **stop**. This call:
+1. Puts the card in `waiting_for_user=True` mode — the orchestrator does not requeue it.
+2. Sends the user an **instant notification over Telegram** (with the chat link).
 
-Plain text yazıp durmak yeterli değil — tool çağrısı olmazsa orchestrator
-session'ı normal "finished" sayıp silent requeue yapar.
+Writing plain text and stopping is not enough — without the tool call the
+orchestrator counts the session as normally "finished" and silently requeues it.
 
 ### `get_kanbancard(card_id, recent_messages=5)`
 
-Başka bir kanban kartının detaylarını döndürür: title, description,
-project, status, complexity, assigned/current agent, ve son N mesaj
-(max 20). Read-only, cross-project OK (kendi projen dışındaki karta
-da bakabilir). Mevcut kart başka bir karta referans veriyor ya da
-bağımlıysa kullan.
+Returns the details of another kanban card: title, description,
+project, status, complexity, assigned/current agent, and the last N
+messages (max 20). Read-only, cross-project OK (it can look at cards
+outside your own project). Use it when the current card references or
+depends on another card.
 
-Örnek çıktı:
+Example output:
 ```
-# Kanban card #18: Forum sayfasinda tasarım değişikliği yap
-- Project: Fenerbahçe Fan
+# Kanban card #18: Redesign the forum page
+- Project: Acme
 - Status: Done  (complexity: 3)
 - Assigned: claude-sonnet
 - Currently working: (none)
@@ -86,80 +87,81 @@ bağımlıysa kullan.
 
 ### `search_kanbancards(query, max_results=20, include_done=true)`
 
-**Aynı proje** içindeki kartların title + description'ında case-insensitive
-substring araması. `updated_at desc` sırasında satır başına
-`#<id> [<status>] <title>` formatında döner.
+Case-insensitive substring search over the title + description of cards
+in the **same project**. Returns one line per card in `updated_at desc`
+order, formatted as `#<id> [<status>] <title>`.
 
-- `max_results`: 1–50 (default 20). Aşılırsa `... truncated at N`.
-- `include_done`: false verirsen Done kartlar gelmez (sadece aktif iş).
+- `max_results`: 1–50 (default 20). When exceeded: `... truncated at N`.
+- `include_done`: pass false to leave out Done cards (active work only).
 
-`create_kanbancard` açmadan **önce** aynı işi daha önce yapılmış ya da şu an
-yapılmakta olan bir kart var mı kontrol için ideal.
+Ideal for checking, **before** opening a `create_kanbancard`, whether a
+card for the same work was already done or is in progress.
 
-Örnek çıktı:
+Example output:
 ```
-Found 2 kanban card(s) matching 'admin stats' in Fenerbahçe Fan:
+Found 2 kanban card(s) matching 'admin stats' in Acme:
 - #42 [in_progress] Add admin stats counter
 - #31 [done] Stats panel cleanup
 ```
 
 ### `get_project_memory()` / `add_project_memory(text)`
 
-Proje-seviyesinde **uzun-vade ortak hafıza**. Bulunduğun projenin
-`description` alanını okur (`get_project_memory`) ya da altına ekleme
-yapar (`add_project_memory`).
+Project-level **long-term shared memory**. Reads the `description` field
+of your current project (`get_project_memory`) or appends to it
+(`add_project_memory`).
 
-`note` ile karıştırma: `note` **şu anki kart**'ın chat'ine düşer —
-o görevi bitirirken bırakılan iz. `add_project_memory` ise **bu projede
-ileride çalışacak başka ajanların** bilmesi gereken şeyler için.
+Don't confuse it with `note`: a `note` lands in the **current card's**
+chat — the trail you leave while finishing that task. `add_project_memory`
+is for things **other agents working on this project later** need to know.
 
-Tipik kullanım:
+Typical use:
 
-- Sen `settings.py`'de bir ayarı değiştirdin → diğer ajanlar yeni
-  yerini arar → `add_project_memory("PG_* artık .env'den okunuyor, settings.py hardcoded dolu değil")`.
-- Projede her yerde `fab deploy` kullanılıyor, senin kartın da öyle
-  yaptıysa → yazma, zaten bilinen bir şey.
-- Discovery türünden: "the crawler `~/workspace/myproject/crawl.py`'de,
-  DB'ye standings da çekiyor artık" gibi gerçek yararlı bilgi.
+- You moved a setting in `settings.py` → other agents will look for its
+  new place → `add_project_memory("PG_* is now read from .env, settings.py no longer hardcodes it")`.
+- The project uses the same deploy command everywhere and your card did
+  too → don't write it, it's already known.
+- Discoveries: genuinely useful facts such as "the crawler lives in
+  `~/workspace/myproject/crawl.py` and now also pulls standings into the DB".
 
-Yazım:
+Style:
 
-- 1-2 cümle. Uzun anlatım karta gider, description'a değil.
-- Otomatik olarak `[2026-04-22 14:30 · <slug>]` başlar, sen tarih yazma.
-- `## Agent memory` başlığı altında bullet olarak birikir — description
-  kirlenmez.
+- 1-2 sentences. Long write-ups go to the card, not the description.
+- Each entry is automatically prefixed with `[2026-04-22 14:30 · <slug>]`; don't write the date yourself.
+- Entries accumulate as bullets under an `## Agent memory` heading — the
+  description itself stays clean.
 
-Yeni bir karta başlamadan önce `get_project_memory()` çek, son 10-15
-satıra bak; önceki ajan bu ortamda ne öğrenmiş?
+Before starting a new card, call `get_project_memory()` and look at the last
+10-15 lines: what did earlier agents learn about this environment?
 
 ### `create_kanbancard(title, description?, complexity=3, status="todo", assigned_agent?)`
 
-**Aynı projede** yeni kanban kartı oluşturur (agent başka projeye iş
-yaratamaz). Subtask akışı için: şu anki iş büyükse parçala, orchestrator
-alt kartları sırasıyla alır. Yeni kartın id'si döner.
+Creates a new kanban card **in the same project** (an agent cannot create
+work in another project). For the subtask flow: if the current work is
+large, split it; the orchestrator picks up the sub-cards in order. Returns
+the new card's id.
 
-- `status` sadece `todo` veya `backlog` — orchestrator geri kalan
-  lifecycle'ı zaten yönetir.
-- `complexity` 1–5; agent'ın `talent >= complexity` olmalı ki
-  dispatcher'da seçilebilsin.
-- `assigned_agent`: opsiyonel slug. Verirsen sadece o agent alır;
-  boşsa dispatcher uygun olanı seçer.
-- Yeni kartın chat'ine otomatik `[created by card-<parent>]` system
-  mesajı düşer (provenance).
+- `status` is only `todo` or `backlog` — the orchestrator manages the
+  rest of the lifecycle.
+- `complexity` 1–5; an agent needs `talent >= complexity` to be
+  selectable by the dispatcher.
+- `assigned_agent`: optional slug. If given, only that agent takes it;
+  if blank, the dispatcher picks a suitable one.
+- A `[created by card-<parent>]` system message is posted automatically
+  to the new card's chat (provenance).
 
-## Nasıl bitiririm?
+## How do I finish?
 
-- Kod + test tamam → `note` ile özet + `set_status("review")`.
-- Üstüne istersen düz text özet de yazabilirsin; zaten chat'e düşer.
+- Code + tests done → summary with `note` + `set_status("review")`.
+- You can add a plain-text summary on top if you like; it lands in the chat anyway.
 
-## Nasıl yardım isterim?
+## How do I ask for help?
 
-- `ask_user("şu netleşmeli: …")`. Telegram'dan sana ping gider.
+- `ask_user("this needs clarifying: …")`. You get pinged on Telegram.
 
-## Subtask akışı önerilen sıra
+## Recommended order for the subtask flow
 
-1. `search_kanbancards("anahtar kelime")` — duplicate var mı bak.
-2. Varsa `get_kanbancard(<id>)` ile detayına bak; orada devam etmek daha iyiyse
-   üstüne iş yaratma.
-3. Yoksa `create_kanbancard(...)` ile yeni subtask'ı aç. Id'yi `note`'una
-   yazarsan kullanıcı UI'dan direkt o karta atlayabilir.
+1. `search_kanbancards("keyword")` — check for duplicates.
+2. If there is one, look at it with `get_kanbancard(<id>)`; if continuing there
+   is better, don't create new work on top of it.
+3. Otherwise open the new subtask with `create_kanbancard(...)`. If you put the
+   id in your `note`, the user can jump straight to that card from the UI.

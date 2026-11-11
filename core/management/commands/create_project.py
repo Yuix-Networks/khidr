@@ -10,7 +10,7 @@ Optional flags:
     --repo-path /path/to/repo         local git repo for this project
     --server "ssh acme"          SSH command for read-only inspection
     --server-path /root/acme     path on the server (reference only)
-    --deploy "fab deploy"             deploy command (default: fab deploy)
+    --deploy "make deploy"            deploy command agents run after push (default: none)
     --force                           overwrite an existing Project row
 """
 
@@ -30,7 +30,7 @@ class Command(BaseCommand):
         parser.add_argument("--repo-path", default="")
         parser.add_argument("--server", default="", help='SSH command, e.g. "ssh acme"')
         parser.add_argument("--server-path", default="")
-        parser.add_argument("--deploy", default="fab deploy")
+        parser.add_argument("--deploy", default="", help="Deploy command run after push (default: none)")
         parser.add_argument("--force", action="store_true")
 
     def handle(self, *args, **opts):
@@ -50,7 +50,7 @@ class Command(BaseCommand):
             "repo_path": opts["repo_path"] or "",
             "server_connection": opts["server"] or "",
             "server_path": opts["server_path"] or "",
-            "deploy_command": opts["deploy"] or "fab deploy",
+            "deploy_command": opts["deploy"] or "",
             "is_active": True,
         }
 

@@ -9,7 +9,7 @@ agents:
     model: qwen2.5-coder-32b
     api_key_env: LOCAL_API_KEY   # opsiyonel
     role: both
-    priority: 1                  # summarizer fallback sıralaması (düşük = öncelikli)
+    priority: 1                  # summarizer fallback order (lower = preferred)
     projects: [example]
 
   - id: openrouter-claude

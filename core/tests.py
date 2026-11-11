@@ -19,28 +19,28 @@ from core.services.agents.mcp_tools import strip_prefix
 
 class BuildPromptTests(SimpleTestCase):
     def test_empty_history(self):
-        self.assertEqual(_build_prompt([]), "Bu kartı al.")
+        self.assertEqual(_build_prompt([]), "Take this card.")
 
     def test_single_user_message_passes_through(self):
-        self.assertEqual(_build_prompt([{"role": "user", "content": "selam"}]), "selam")
+        self.assertEqual(_build_prompt([{"role": "user", "content": "hello"}]), "hello")
 
     def test_history_is_folded_ahead_of_latest_message(self):
         prompt = _build_prompt([
-            {"role": "user", "content": "ilk"},
-            {"role": "assistant", "content": "cevap"},
-            {"role": "user", "content": "son"},
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "answer"},
+            {"role": "user", "content": "last"},
         ])
-        self.assertIn("## user\n\nilk", prompt)
-        self.assertIn("## assistant\n\ncevap", prompt)
-        self.assertTrue(prompt.endswith("son"))
+        self.assertIn("## user\n\nfirst", prompt)
+        self.assertIn("## assistant\n\nanswer", prompt)
+        self.assertTrue(prompt.endswith("last"))
 
     def test_trailing_assistant_turn_continues(self):
         prompt = _build_prompt([
-            {"role": "user", "content": "ilk"},
-            {"role": "assistant", "content": "yarım"},
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "half-done"},
         ])
-        self.assertIn("## assistant\n\nyarım", prompt)
-        self.assertTrue(prompt.endswith("devam et"))
+        self.assertIn("## assistant\n\nhalf-done", prompt)
+        self.assertTrue(prompt.endswith("continue"))
 
 
 class CliEnvTests(SimpleTestCase):

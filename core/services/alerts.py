@@ -123,12 +123,12 @@ def glitchtip_issue_first_seen(issue_url: str) -> datetime | None:
 
 _TRIAGE = """
 ---
-**Önce triyaj:** Bu kart GlitchTip'te ilk kez görülen bir hatadan otomatik açıldı; gerçek bir iş olmayabilir.
-Issue'yu (`get_glitchtip_issue`) ve ilgili kodu/logları incele, sonra karar ver:
-- Kodda düzeltilecek gerçek bir hataysa düzelt ve normal akışla gönder.
-- Gereksizse (geçici/tek seferlik: deploy anı, ağ/sağlayıcı kesintisi, bot/tarayıcı gürültüsü, zaten düzeltilmiş, \
-kodla ilgisi yok) kod değiştirmeden `reject_task` çağır: kısa gerekçe yaz; tekrar gelirse yine gürültü olacaksa \
-`ignore_pattern` ile başlığa uyan bir regex ver ki bir daha kart açılmasın."""
+**Triage first:** This card was opened automatically from an error GlitchTip saw for the first time; it may not be real work.
+Look at the issue (`get_glitchtip_issue`) and the related code/logs, then decide:
+- If it is a real bug to fix in the code, fix it and ship it through the normal flow.
+- If it is noise (transient/one-off: mid-deploy, network/provider outage, bot/browser noise, already fixed, \
+unrelated to the code), call `reject_task` without changing code: give a short reason; if it would be noise again \
+when it recurs, pass an `ignore_pattern` regex matching the title so no card is opened for it again."""
 
 
 def ingest_glitchtip(
@@ -178,46 +178,53 @@ _OPEN = [Task.STATUS_BACKLOG, Task.STATUS_TODO, Task.STATUS_IN_PROGRESS]
 _SERVER_MONITOR = re.compile(r"^Server (\S+)$")
 
 
-def _server_description(name: str, alias: str, msg: str, when: str) -> str:
-    """A "Server <alias>" push monitor (servers repo `fab kuma-push`): the server checks itself
-    every minute and pushes; DOWN = its check failed (msg says why) or no push arrived."""
+def _ship_line(project: Project) -> str:
+    """How a code fix reaches the server, phrased from the project's deploy_command."""
+    deploy = (project.deploy_command or "").strip()
+    flow = f"commit → push → `{deploy}`" if deploy else "commit → push → the project's deploy step"
+    return (
+        f"If the cause is application code, fix it and ship it through the normal flow ({flow}). "
+        "No code edits on the server; SSH is for inspection only."
+    )
+
+
+def _server_description(project: Project, name: str, alias: str, msg: str, when: str) -> str:
+    """A "Server <alias>" push monitor: the server checks itself every minute and
+    pushes; DOWN = its check failed (msg says why) or no push arrived."""
     return "\n".join([
-        f"**Uptime Kuma:** `{name}` DOWN (sunucunun kendi dakikalık kontrolü)",
-        f"**Kuma mesajı:** {msg}" if msg else "",
-        f"**Zaman:** {when}" if when else "",
+        f"**Uptime Kuma:** `{name}` DOWN (the server's own once-a-minute check)",
+        f"**Kuma message:** {msg}" if msg else "",
+        f"**Time:** {when}" if when else "",
         "",
-        f"`{alias}` sunucusu kendi kontrolünü geçemedi ya da hiç push gönderemedi "
-        "(sunucu/ağ/cron kapalı). HA çiftinde site diğer CT'den açık kalabilir; yine de çöz:",
-        f"1. `ssh {alias}` ile bağlan (bağlanamıyorsan sunucu ya da ağ kapalı: bulguları yaz, review'a al).",
-        "2. Kontrolü elle çalıştır: `. /etc/kuma-push.env && bash -c \"$KUMA_CHECK\"` — neyin bozuk olduğunu söyler.",
-        "3. Servisler (supervisorctl/systemctl), nginx ve uygulama logları, disk/RAM, PostgreSQL "
-        "(çiftlerde `fab pair-pg-state`).",
-        "4. Neden uygulama koduysa düzelt ve normal akışla gönder (commit → push → fab deploy). "
-        "Sunucuda kod düzenleme yok; SSH sadece inceleme için.",
-        "Kontrol tekrar geçince Uptime Kuma bunu bu kartın sohbetine yazar.",
+        f"Server `{alias}` failed its own check or could not push at all "
+        "(server/network/cron down). In a redundant pair the site may stay up from the other node; fix it anyway:",
+        f"1. Connect with `ssh {alias}` (if you can't, the server or network is down: write up your findings, move to review).",
+        "2. Run the check by hand — whatever the push job runs — to see what is broken.",
+        "3. Services (supervisorctl/systemctl), nginx and application logs, disk/RAM, PostgreSQL.",
+        f"4. {_ship_line(project)}",
+        "Once the check passes again, Uptime Kuma posts it to this card's chat.",
     ]).replace("\n\n\n", "\n\n")
 
 
 def _uptime_description(project: Project, monitor: dict, msg: str, when: str) -> str:
     m = _SERVER_MONITOR.match((monitor.get("name") or "").strip())
     if m and not monitor.get("url"):
-        return _server_description(monitor.get("name"), m.group(1), msg, when)
+        return _server_description(project, monitor.get("name"), m.group(1), msg, when)
     url = monitor.get("url") or ""
-    server = project.server_connection or "(Project.server_connection boş)"
+    server = project.server_connection or "(Project.server_connection is empty)"
     return "\n".join([
         f"**Uptime Kuma:** `{monitor.get('name')}` DOWN",
         f"**URL:** {url}" if url else "",
-        f"**Kuma mesajı:** {msg}" if msg else "",
-        f"**Zaman:** {when}" if when else "",
+        f"**Kuma message:** {msg}" if msg else "",
+        f"**Time:** {when}" if when else "",
         "",
-        "Site erişilemiyor. Hemen teşhis et:",
-        f"1. `curl -sSIL --max-time 20 {url or '<url>'}` ile durumu, DNS'i (`dig`) ve TLS'i kontrol et.",
-        f"2. Sunucuya bak (`{server}`): servis durumu (supervisorctl/systemctl/docker ps), "
-        "nginx ve uygulama logları, disk/RAM.",
-        "3. Neden uygulama koduysa düzelt ve normal akışla gönder (commit → push → fab deploy). "
-        "Sunucuda kod düzenleme yok; SSH sadece inceleme için.",
-        "4. Kod dışı bir nedense (DNS, sağlayıcı, ağ, donanım, sertifika) bulguları yaz ve review'a al.",
-        "Site tekrar ayağa kalkınca Uptime Kuma bunu bu kartın sohbetine yazar.",
+        "The site is unreachable. Diagnose it now:",
+        f"1. Check the status with `curl -sSIL --max-time 20 {url or '<url>'}`, plus DNS (`dig`) and TLS.",
+        f"2. Look at the server (`{server}`): service state (supervisorctl/systemctl/docker ps), "
+        "nginx and application logs, disk/RAM.",
+        f"3. {_ship_line(project)}",
+        "4. If the cause is outside the code (DNS, provider, network, hardware, certificate), write up your findings and move to review.",
+        "Once the site is back up, Uptime Kuma posts it to this card's chat.",
     ]).replace("\n\n\n", "\n\n")
 
 
@@ -250,12 +257,12 @@ def ingest_uptime(payload: dict) -> tuple[str, Task | None]:
             Task.objects.filter(pk=open_task.pk).update(status=Task.STATUS_DONE)
             ChatMessage.objects.create(
                 task=open_task, role=ChatMessage.ROLE_SYSTEM,
-                content=f"[uptime] `{name}` ajan almadan tekrar ayağa kalktı ({msg or 'UP'}); kart kapatıldı.",
+                content=f"[uptime] `{name}` came back up before an agent took it ({msg or 'UP'}); card closed.",
             )
             return "resolved", open_task
         ChatMessage.objects.create(
             task=open_task, role=ChatMessage.ROLE_SYSTEM,
-            content=f"[uptime] `{name}` tekrar ayakta ({msg or 'UP'}, {when}).",
+            content=f"[uptime] `{name}` is back up ({msg or 'UP'}, {when}).",
         )
         return "recovered", open_task
 
@@ -269,7 +276,7 @@ def ingest_uptime(payload: dict) -> tuple[str, Task | None]:
     grace = int(getattr(settings, "UPTIME_DOWN_GRACE_SECONDS", 60))
     task = Task.objects.create(
         project=project,
-        title=f"[DOWN] {name} erişilemiyor"[:512],
+        title=f"[DOWN] {name} unreachable"[:512],
         description=_uptime_description(project, monitor, msg, when),
         status=Task.STATUS_TODO,
         position=_top_position(project),

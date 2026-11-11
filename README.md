@@ -66,7 +66,9 @@ python -c "from chat.auth import hash_password; print(hash_password('choose-a-pa
 
 and put the output in `WEB_PASSWORD_HASH` in `.env`.
 
-Agent containers are described in [docs/agent-containers.md](docs/agent-containers.md).
+Build the agent image, then start and provision one container per agent with
+`python manage.py provision_agents` — see
+[docs/agent-containers.md](docs/agent-containers.md).
 
 ## Configuration
 

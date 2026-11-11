@@ -205,7 +205,7 @@ class RejectTaskToolTests(TestCase):
     @mock.patch("core.services.tools.notify_task")
     def test_reject_closes_card_and_adds_rule(self, _notify):
         r = Toolbox(self.task).call("reject_task", {
-            "reason": "deploy sırasında geçici", "ignore_pattern": r"No module named 'pyotp'",
+            "reason": "transient during deploy", "ignore_pattern": r"No module named 'pyotp'",
         })
         self.assertFalse(r.detail.get("error"), r.content)
         self.task.refresh_from_db()
@@ -226,7 +226,7 @@ class RejectTaskToolTests(TestCase):
         self.task.source = Task.SOURCE_MANUAL
         r = Toolbox(self.task).call("reject_task", {"reason": "x", "ignore_pattern": "pyotp"})
         self.assertEqual(r.detail.get("error"), "bad_arg")
-        r = Toolbox(self.task).call("reject_task", {"reason": "zaten yapılmış"})
+        r = Toolbox(self.task).call("reject_task", {"reason": "already done"})
         self.assertFalse(r.detail.get("error"), r.content)
 
 
@@ -263,7 +263,7 @@ class UptimeKumaWebhookTests(TestCase):
         self.post(_kuma(0))
         Task.objects.update(status=Task.STATUS_IN_PROGRESS)
         self.assertEqual(self.post(_kuma(1, msg="200 - OK")).json()["result"], "recovered")
-        self.assertTrue(ChatMessage.objects.filter(content__contains="tekrar ayakta").exists())
+        self.assertTrue(ChatMessage.objects.filter(content__contains="is back up").exists())
 
     def test_new_incident_after_review_opens_new_card(self):
         self.post(_kuma(0))

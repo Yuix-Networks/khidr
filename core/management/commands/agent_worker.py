@@ -184,20 +184,20 @@ def _build_prompt(messages: list[dict]) -> str:
     turns go in as a transcript ahead of the latest user message.
     """
     if not messages:
-        return "Bu kartı al."
+        return "Take this card."
     *history, last = messages
     if last.get("role") == "user":
         current = last.get("content") or ""
     else:
         history.append(last)
-        current = "devam et"
+        current = "continue"
     if not history:
         return current
-    lines = ["# Bu karttaki önceki konuşma", ""]
+    lines = ["# Earlier conversation on this card", ""]
     for m in history:
         who = "assistant" if m.get("role") == "assistant" else "user"
         lines.append(f"## {who}\n\n{(m.get('content') or '').strip()}\n")
-    lines.append("---\n\n# Yeni mesaj\n")
+    lines.append("---\n\n# New message\n")
     lines.append(current)
     return "\n".join(lines)
 
@@ -233,11 +233,11 @@ def _park_task_for_user(
     agent_slug: str | None,
     *,
     note: str = (
-        "[orchestrator] agent tur limitine takıldı (MaxTurnsExceeded). "
-        "Görev durduruldu ve kullanıcı müdahalesi bekleniyor. "
-        "Devam etmek için chat'e bir mesaj yaz veya kartı manuel yeniden başlat."
+        "[orchestrator] the agent hit its turn limit (MaxTurnsExceeded). "
+        "The task is stopped and waiting for the user. "
+        "To continue, write a message in the chat or restart the card manually."
     ),
-    ping: str = "🛑 Maksimum tur aşıldı",
+    ping: str = "🛑 Max turns exceeded",
 ) -> None:
     """Park a task in waiting_for_user state (max turns / rate limit).
 
@@ -443,7 +443,7 @@ async def _run(
         _emit({
             "event": "done",
             "reason": "waiting_for_user",
-            "message": f"Maksimum {max_turns} tur aşıldı. Görevi kısa adımlara bölerek devam edin.",
+            "message": f"Exceeded the maximum of {max_turns} turns. Continue by splitting the task into shorter steps.",
         })
         return 0
 
@@ -460,11 +460,11 @@ async def _run(
             task.pk,
             agent.slug,
             note=(
-                "[orchestrator] API rate limit (429) CLI'ın tekrar denemelerinden "
-                "sonra da aşıldı. Görev park edildi — birkaç dakika bekleyip "
-                "chat'e 'devam' yazın."
+                "[orchestrator] API rate limit (429) still exceeded after the CLI's "
+                "retries. The task is parked — wait a few minutes, then write "
+                "'continue' in the chat."
             ),
-            ping="🛑 API rate limit aşıldı",
+            ping="🛑 API rate limit exceeded",
         )
         _emit({"event": "done", "reason": "waiting_for_user", "message": f"rate limit: {error_text[:300]}"})
         return 0

@@ -65,7 +65,7 @@ def _notify_new_task(task_id: int) -> None:
     task = Task.objects.select_related("project").filter(pk=task_id).first()
     if task is None:
         return
-    headline = f"🆕 Yeni iş · {task.project.name}"
+    headline = f"🆕 New task · {task.project.name}"
     if task.source != Task.SOURCE_MANUAL:
         headline += f" ({task.get_source_display()})"
     body = task.description[:300]

@@ -351,14 +351,14 @@ class AgentSession:
             role=ChatMessage.ROLE_SYSTEM,
             content=(
                 f"{self.ERROR_MARKER}: stopped after {reason}. "
-                "Kullanıcı müdahalesi bekliyorum — agent/API key'i düzelt ya da "
-                "başka bir agent ata, sonra chat'e bir mesaj yaz."
+                "Waiting for the user — fix the agent/API key or assign "
+                "another agent, then write a message in the chat."
             ),
         )
         try:
             notify_task(
                 task,
-                "🛑 Agent durdu",
+                "🛑 Agent stopped",
                 body=f"{reason}\n\n{detail[:400]}" if detail else reason,
             )
         except Exception as exc:  # noqa: BLE001
@@ -393,10 +393,10 @@ class AgentSession:
                 task=task,
                 role=ChatMessage.ROLE_SYSTEM,
                 content=(
-                    f"{self.REQUEUE_MARKER} {self.REQUEUE_CAP} kez aynı agent'a "
-                    "yeniden verildi ama Review/Done hâlâ gelmedi. Kullanıcı "
-                    "müdahalesi bekliyorum. Chat'e bir mesaj yazarak yönlendirin "
-                    "veya kartı manuel taşıyın."
+                    f"{self.REQUEUE_MARKER} handed back to the same agent {self.REQUEUE_CAP} "
+                    "times but still no Review/Done. Waiting for the user. "
+                    "Steer it by writing a message in the chat "
+                    "or move the card manually."
                 ),
             )
             Task.objects.filter(pk=task.pk).update(
@@ -413,8 +413,8 @@ class AgentSession:
             try:
                 notify_task(
                     task,
-                    f"🆘 {self.REQUEUE_CAP} requeue sonrası takıldı",
-                    body=f"Agent: {agent.slug if agent else '?'}. Manuel müdahale gerekli.",
+                    f"🆘 Stuck after {self.REQUEUE_CAP} requeues",
+                    body=f"Agent: {agent.slug if agent else '?'}. Manual intervention needed.",
                 )
             except Exception as exc:  # noqa: BLE001
                 log.warning("telegram notify (requeue cap) failed: %s", exc)

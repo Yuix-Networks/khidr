@@ -34,7 +34,7 @@ def login_view(request):
             request.session[SESSION_KEY] = True
             request.session.set_expiry(30 * 24 * 3600)  # 30 days
             return redirect(request.GET.get("next") or "/")
-        error = "Yanlış şifre."
+        error = "Wrong password."
     return render(request, "chat/login.html", {"error": error})
 
 
@@ -358,9 +358,9 @@ def close_and_create_task(request, task_id: int):
             key = os.environ.get("MINIMAX_API_KEY") or ""
             if key:
                 prompt = (
-                    "Aşağıdaki sohbet geçmişinin özetini çıkar. Yapılan işleri, kararları "
-                    "ve önemli detayları 2-3 cümlede özetle. Gelecekteki bir ajanın bu görev "
-                    "serisini anlaması için gerekli tüm bilgiyi koru:\n\n" + chat_text[:8000]
+                    "Summarize the chat history below. Cover the work done, the decisions "
+                    "and the important details in 2-3 sentences. Keep everything a future "
+                    "agent needs to understand this series of tasks:\n\n" + chat_text[:8000]
                 )
                 resp = httpx.post(
                     "https://api.minimax.io/minimax-api/v1/text/chatcompletion_v2",
@@ -389,7 +389,7 @@ def close_and_create_task(request, task_id: int):
     ChatMessage.objects.create(
         task=old_task,
         role=ChatMessage.ROLE_USER,
-        content=f"✓ Kapatıldı ve özetlendi → yeni görev açıldı: {new_title}",
+        content=f"✓ Closed and summarized → new task opened: {new_title}",
     )
 
     last = (
@@ -402,7 +402,7 @@ def close_and_create_task(request, task_id: int):
 
     description = summary or ""
     if old_task.description:
-        description = f"{old_task.description}\n\n---\n{summary or '(özet alınamadı)'}".strip()
+        description = f"{old_task.description}\n\n---\n{summary or '(summary unavailable)'}".strip()
 
     new_task = Task.objects.create(
         project=old_task.project,

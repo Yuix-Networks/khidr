@@ -77,10 +77,10 @@
     ws.onclose = (ev) => {
       if (manuallyClosed) return;
       if (ev.code === 4401) {
-        setHint("🔒 oturum sona erdi — yeniden giriş yap", "err");
+        setHint("🔒 session expired — sign in again", "err");
         return;
       }
-      setHint(`🔌 bağlantı yok, yeniden deneniyor...`, "warn");
+      setHint(`🔌 disconnected, retrying...`, "warn");
       reconnectTimer = setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 15000);
     };
@@ -362,11 +362,11 @@
       const status = t.agent_status || "idle";
       const detail = t.agent_status_detail || "";
       const labels = {
-        thinking: "🤔 düşünüyor",
-        tool_call: detail ? `🔧 ${detail}` : "🔧 tool çağrıyor",
-        writing: "✍️ yazıyor",
-        idle: "⏸ bekliyor",
-        done: "✅ tamamlandı",
+        thinking: "🤔 thinking",
+        tool_call: detail ? `🔧 ${detail}` : "🔧 calling a tool",
+        writing: "✍️ writing",
+        idle: "⏸ idle",
+        done: "✅ done",
       };
       agentStatusPill.textContent = labels[status] || status;
       agentStatusPill.className = "pill agent-status status-" + status;
@@ -390,7 +390,7 @@
     }
 
     hint.textContent = t.waiting_for_user ? "⏸ waiting_for_user" : "";
-    input.placeholder = t.waiting_for_user ? "Agent senden cevap bekliyor..." : "Mesaj yaz (Cmd/Ctrl+Enter)";
+    input.placeholder = t.waiting_for_user ? "The agent is waiting for your answer..." : "Write a message (Cmd/Ctrl+Enter)";
 
     wrap.dataset.status = t.status;
     wrap.dataset.waiting = t.waiting_for_user ? "1" : "0";
@@ -431,7 +431,7 @@
     try {
       await post(`/tasks/${taskId}/send/`, { text: txt });
     } catch (e) {
-      alert("Gönderilemedi: " + e);
+      alert("Could not send: " + e);
       input.value = txt;
     } finally {
       sendBtn.disabled = false;
@@ -470,7 +470,7 @@
           b.textContent = "✓ Approved";
         });
       } catch (e) {
-        alert("Onaylanamadı: " + e);
+        alert("Could not approve: " + e);
         lock(false);
       }
     });
@@ -506,13 +506,13 @@
 
   if (deleteBtn) {
     deleteBtn.addEventListener("click", async () => {
-      if (!confirm("Bu task'ı sil? Geri alınamaz (chat geçmişi dahil).")) return;
+      if (!confirm("Delete this task? This cannot be undone (chat history included).")) return;
       deleteBtn.disabled = true;
       try {
         const r = await post(`/tasks/${taskId}/delete/`, {});
         location.href = r.project_id ? `/projects/${r.project_id}/` : "/";
       } catch (e) {
-        alert("Silinemedi: " + e);
+        alert("Could not delete: " + e);
         deleteBtn.disabled = false;
       }
     });

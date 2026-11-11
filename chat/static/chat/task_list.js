@@ -20,23 +20,23 @@
     return s.length > n ? s.slice(0, n - 1) + "…" : s;
   }
 
-  // "az önce", "3 dk önce", "2 sa önce", "dün", "4 gün önce", "1 hafta önce" …
+  // "just now", "3m ago", "2h ago", "yesterday", "4d ago", "1w ago" …
   function humanizeAgo(iso) {
     if (!iso) return "";
     const d = new Date(iso);
     if (isNaN(d)) return "";
     const s = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
-    if (s < 60) return "az önce";
+    if (s < 60) return "just now";
     const m = Math.floor(s / 60);
-    if (m < 60) return `${m} dk önce`;
+    if (m < 60) return `${m}m ago`;
     const h = Math.floor(m / 60);
-    if (h < 24) return `${h} sa önce`;
+    if (h < 24) return `${h}h ago`;
     const days = Math.floor(h / 24);
-    if (days === 1) return "dün";
-    if (days < 7) return `${days} gün önce`;
-    if (days < 30) return `${Math.floor(days / 7)} hafta önce`;
-    if (days < 365) return `${Math.floor(days / 30)} ay önce`;
-    return `${Math.floor(days / 365)} yıl önce`;
+    if (days === 1) return "yesterday";
+    if (days < 7) return `${days}d ago`;
+    if (days < 30) return `${Math.floor(days / 7)}w ago`;
+    if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+    return `${Math.floor(days / 365)}y ago`;
   }
 
   function fullDate(iso) {
@@ -71,16 +71,16 @@
     const wait = t.waiting_for_user ? `<span class="wait" title="waiting for user">⏸</span>` : "";
     const approve = t.status === "review"
       ? `<button type="button" class="btn card-approve" data-js="approve-btn"
-                data-task-id="${t.id}" title="Done'a taşı">✓ Approve</button>`
+                data-task-id="${t.id}" title="Move to Done">✓ Approve</button>`
       : "";
     const todoBtn = t.status === "backlog"
       ? `<button type="button" class="btn card-todo" data-js="todo-btn"
-                data-task-id="${t.id}" title="Todo'ya taşı">→ Todo</button>`
+                data-task-id="${t.id}" title="Move to Todo">→ Todo</button>`
       : "";
     return `
       <li class="card c-${t.complexity}" data-task-id="${t.id}">
         <button type="button" class="card-del" data-js="del-card"
-                data-task-id="${t.id}" title="Sil">×</button>
+                data-task-id="${t.id}" title="Delete">×</button>
         <a href="/tasks/${t.id}/">
           <span class="title">${escapeHtml(truncate(t.title, 80))}</span>
           <span class="meta">${cpx}${agent}${wait}${agoHtml(t.created_at)}</span>
@@ -146,7 +146,7 @@
               approveBtn.className = "btn card-approve";
               approveBtn.dataset.js = "approve-btn";
               approveBtn.dataset.taskId = t.id;
-              approveBtn.title = "Done'a taşı";
+              approveBtn.title = "Move to Done";
               approveBtn.textContent = "✓ Approve";
               el.appendChild(approveBtn);
             }
@@ -162,7 +162,7 @@
               todoBtn.className = "btn card-todo";
               todoBtn.dataset.js = "todo-btn";
               todoBtn.dataset.taskId = t.id;
-              todoBtn.title = "Todo'ya taşı";
+              todoBtn.title = "Move to Todo";
               todoBtn.textContent = "→ Todo";
               el.appendChild(todoBtn);
             }
@@ -232,7 +232,7 @@
     ev.stopPropagation();
     const btn = ev.currentTarget;
     const id = btn.dataset.taskId;
-    if (!confirm("Bu task'ı sil? Geri alınamaz.")) return;
+    if (!confirm("Delete this task? This cannot be undone.")) return;
     btn.disabled = true;
     try {
       const r = await fetch(`/tasks/${id}/delete/`, {
@@ -245,7 +245,7 @@
       if (!r.ok) throw new Error(data.error || r.statusText);
       // WebSocket will reconcile the card away; no manual DOM surgery here.
     } catch (e) {
-      alert("Silinemedi: " + String(e).replace(/^Error:\s*/, ""));
+      alert("Could not delete: " + String(e).replace(/^Error:\s*/, ""));
       btn.disabled = false;
     }
   }
@@ -276,7 +276,7 @@
       if (!r.ok) throw new Error(data.error || r.statusText);
       // WebSocket will reconcile the card to Done column.
     } catch (e) {
-      alert("Onaylanamadı: " + String(e).replace(/^Error:\s*/, ""));
+      alert("Could not approve: " + String(e).replace(/^Error:\s*/, ""));
       btn.disabled = false;
       btn.classList.remove("loading");
     }
@@ -295,7 +295,7 @@
     ev.stopPropagation();
     const btn = ev.currentTarget;
     const id = btn.dataset.taskId;
-    if (!confirm("Bu kartı Todo'ya taşı?")) return;
+    if (!confirm("Move this card to Todo?")) return;
     btn.disabled = true;
     btn.classList.add("loading");
     try {
@@ -309,7 +309,7 @@
       if (!r.ok) throw new Error(data.error || r.statusText);
       // WebSocket will reconcile the card to Todo column.
     } catch (e) {
-      alert("Todo'ya taşınamadı: " + String(e).replace(/^Error:\s*/, ""));
+      alert("Could not move to Todo: " + String(e).replace(/^Error:\s*/, ""));
       btn.disabled = false;
       btn.classList.remove("loading");
     }
@@ -369,7 +369,7 @@
       dialog.close();
       location.reload();
     } catch (e) {
-      alert("Oluşturulamadı: " + e);
+      alert("Could not create: " + e);
     } finally {
       submit.disabled = false;
     }

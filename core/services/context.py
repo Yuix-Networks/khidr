@@ -36,13 +36,14 @@ def build_system_prompt(task: Task) -> str:
         + (
             proj.description.strip()
             if proj.description
-            else "(açıklama henüz girilmedi)"
+            else "(no description yet)"
         )
     )
 
+    deploy = (proj.deploy_command or "").strip()
     env_lines = [
         f"- Local: {proj.repo_path or '(not set — ask user)'}",
-        f"- Deploy: {proj.deploy_command}",
+        f"- Deploy: {deploy or '(none — this project has no deploy step)'}",
     ]
     if proj.python_path:
         env_lines.append(f"- Python: {proj.python_path}")
@@ -58,7 +59,11 @@ def build_system_prompt(task: Task) -> str:
     env_lines.append(
         f"⚠️ Shell cwd persists across calls. File tools resolve against `{local}`. "
         f"Use absolute paths or `cd {local} && <cmd>`. "
-        f"Never edit server files directly — use `fab deploy`."
+        + (
+            f"Never edit server files directly — ship with `{deploy}`."
+            if deploy
+            else "Never edit server files directly."
+        )
     )
 
     parts.append("# Environment\n\n" + "\n".join(env_lines) + "\n")
@@ -117,13 +122,15 @@ def build_messages(task: Task, seed_if_empty: bool = True) -> list[dict]:
             messages.append({"role": "user", "content": f"[system] {m.content}"})
 
     if not messages and seed_if_empty:
+        deploy = (task.project.deploy_command or "").strip()
+        ship = f"commit + push + `{deploy}`" if deploy else "commit + push"
         messages.append(
             {
                 "role": "user",
                 "content": (
-                    "Bu kartı al. Memory'deki akışa uyarak başla: önce küçük bir plan, "
-                    "sonra main üzerinde çalış, test et, commit + push + fab deploy, "
-                    "Review'a taşı."
+                    "Take this card. Start by following the flow in Shared Memory: "
+                    f"first a short plan, then work on main, test, {ship}, "
+                    "move it to Review."
                 ),
             }
         )

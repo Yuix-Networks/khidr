@@ -375,7 +375,7 @@ class Toolbox:
 
         if raw == Task.STATUS_REVIEW:
             try:
-                notify_task(self.task, "✅ Review'a hazır")
+                notify_task(self.task, "✅ Ready for review")
             except Exception as exc:  # noqa: BLE001
                 log.warning("telegram notify (review) failed: %s", exc)
 
@@ -1028,6 +1028,11 @@ class Toolbox:
             timeout=30,
         )
 
+    def _deploy_hint(self) -> str:
+        """' (+ `<deploy_command>`)' for the project, or '' when it has none."""
+        deploy = (self.task.project.deploy_command or "").strip()
+        return f" (+ `{deploy}`)" if deploy else ""
+
     def _default_branch_in_agent_repo(self, repo: Path) -> str | None:
         """Resolve the repo's actual default branch (main, master, …).
 
@@ -1071,7 +1076,7 @@ class Toolbox:
                 content=(
                     "Refusing set_status: repo has uncommitted changes.\n"
                     f"git status --porcelain:\n{dirty.stdout[:2000]}\n\n"
-                    "Commit and push (+ fab deploy) — or discard the changes "
+                    f"Commit and push{self._deploy_hint()} — or discard the changes "
                     "— and then try set_status again."
                 ),
                 detail={"error": "dirty_repo", "status": dirty.stdout[:400]},
@@ -1103,8 +1108,8 @@ class Toolbox:
             return ToolResult(
                 content=(
                     f"Refusing set_status: {n_unpushed} local commit(s) on "
-                    f"{default_branch} are not pushed. `git push` and run "
-                    "`fab deploy` before calling set_status again."
+                    f"{default_branch} are not pushed. `git push`{self._deploy_hint()} "
+                    "before calling set_status again."
                 ),
                 detail={"error": "unpushed", "ahead": n_unpushed},
             )

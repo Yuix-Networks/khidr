@@ -36,7 +36,9 @@ class Project(models.Model):
         max_length=256,
         blank=True,
         null=True,
-        default="fab deploy",
+        default="",
+        help_text='Command agents run after pushing to ship the change, e.g. "fab deploy" '
+        'or "make deploy". Leave blank if the project has no deploy step.',
     )
 
     # Remote server access (for inspection/debug only — no code changes on server)

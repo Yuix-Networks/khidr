@@ -89,7 +89,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 20px; }
   overflow-y: auto; min-height: 24px;
 }
 .col ul:empty::after {
-  content: "boş"; display: block; text-align: center; padding: 14px 0;
+  content: "empty"; display: block; text-align: center; padding: 14px 0;
   font: 11px var(--mono); color: var(--fg-dim); opacity: .5;
   border: 1px dashed var(--border); border-radius: 6px;
 }
