@@ -47,7 +47,7 @@ and moves the card to *Review* for you to approve or send back.
 Requirements: Python 3.12+, PostgreSQL, Docker (for agent containers).
 
 ```bash
-git clone https://github.com/akarca/khidr.git && cd khidr
+git clone https://github.com/Yuix-Networks/khidr.git && cd khidr
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env            # then fill it in (see below)
@@ -95,7 +95,7 @@ Tests use SQLite and need no secrets or running services.
 
 ## Status
 
-Khidr has run in production for its authors for months, but it is young as an
+Khidr has run in production at Yuix Networks for months, but it is young as an
 open-source project: parts of the UI and the agent prompts (`shared/*.md`) are
 still in Turkish, and container provisioning is manual. Contributions welcome —
 see [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -103,3 +103,11 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 [Apache License 2.0](LICENSE)
+
+---
+
+Khidr is built and maintained by [Yuix Networks](https://yuix.org), the team behind
+[Nameocean.net](https://nameocean.net).
+
+- [Yuix.org](https://yuix.org)
+- [Nameocean.net](https://nameocean.net)
