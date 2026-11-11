@@ -20,8 +20,6 @@ whitenoise>=6.12       # static file serving inside the Django app (no nginx)
 # Auth
 passlib[bcrypt]>=1.7.4
 
-# Agents
-claude-agent-sdk>=0.2.179  # agent harness; wheel bundles the Claude Code CLI
 
 # Observability
 sentry-sdk>=2.74

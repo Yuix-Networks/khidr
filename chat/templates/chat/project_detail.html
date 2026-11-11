@@ -11,7 +11,7 @@
         {% if project.description %}<p class="muted" style="margin: 4px 0 0;">{{ project.description|truncatechars:200 }}</p>{% endif %}
       </div>
       <div class="project-meta">
-        {% if project.repo_path %}<span class="pill branch">{{ project.repo_path }}</span>{% endif %}
+        {% if project.repo_url %}<span class="pill branch">{{ project.repo_url }}</span>{% endif %}
         <button type="button" class="btn" data-js="new-task-btn" data-project-id="{{ project.id }}">+ New task</button>
       </div>
     </header>

@@ -15,39 +15,75 @@ class Project(models.Model):
         help_text="URL-friendly identifier. Auto-generated from name if blank."
     )
     description = models.TextField(blank=True, null=True)
-    repo_path = models.CharField(
-        max_length=512,
-        blank=True,
-        null=True,
-        help_text="Absolute path to local git repo. Required before tasks can run.",
-    )
     repo_url = models.CharField(
         max_length=512,
         blank=True,
         null=True,
         help_text=(
-            "Git remote URL used to clone this project into "
-            'each agent container, e.g. "git@github.com:your-org/your-project.git". '
-            "If blank, provisioning falls back to the origin URL of the host's "
-            "existing clone at repo_path (and skips the project if there is none)."
+            'Git URL Khidr clones and pushes, e.g. "git@github.com:your-org/your-project.git" '
+            'or "https://github.com/your-org/your-project.git". Blank = the project has no repo '
+            "(agents get an empty working directory)."
         ),
     )
+    default_branch = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        help_text="Branch tasks start from and publish to. Blank = the remote's HEAD branch.",
+    )
+
+    # Git credentials stay on the orchestrator host: Khidr fetches and pushes
+    # itself, agents never see them.
+    GIT_AUTH_HOST = "host"
+    GIT_AUTH_TOKEN = "token"
+    GIT_AUTH_SSH_KEY = "ssh_key"
+    GIT_AUTH_CHOICES = [
+        (GIT_AUTH_HOST, "Host git config (your own SSH agent / credential helper)"),
+        (GIT_AUTH_TOKEN, "HTTPS token from an env var"),
+        (GIT_AUTH_SSH_KEY, "Dedicated SSH key file (e.g. a deploy key)"),
+    ]
+    git_auth = models.CharField(max_length=16, choices=GIT_AUTH_CHOICES, default=GIT_AUTH_HOST)
+    git_token_env = models.CharField(
+        max_length=64, blank=True, default="",
+        help_text="Env var on the orchestrator host holding the HTTPS token (git_auth=token).",
+    )
+    git_ssh_key_path = models.CharField(
+        max_length=512, blank=True, default="",
+        help_text="Private key file on the orchestrator host (git_auth=ssh_key).",
+    )
+
+    PUBLISH_DEFAULT_BRANCH = "default_branch"
+    PUBLISH_TASK_BRANCH = "task_branch"
+    PUBLISH_CHOICES = [
+        (PUBLISH_DEFAULT_BRANCH, "Rebase onto the default branch and push it"),
+        (PUBLISH_TASK_BRANCH, "Push a khidr/task-<id> branch (open a PR yourself)"),
+    ]
+    publish_mode = models.CharField(
+        max_length=16, choices=PUBLISH_CHOICES, default=PUBLISH_DEFAULT_BRANCH,
+        help_text="What Khidr does with the agent's commits when it moves a card to Review.",
+    )
+
     deploy_command = models.CharField(
         max_length=256,
         blank=True,
         null=True,
         default="",
-        help_text='Command agents run after pushing to ship the change, e.g. "fab deploy" '
-        'or "make deploy". Leave blank if the project has no deploy step.',
+        help_text='Command Khidr runs on the orchestrator host when an agent calls the deploy '
+        'tool, e.g. "make deploy". Runs in the task workspace after publishing.',
+    )
+    allow_agent_deploy = models.BooleanField(
+        default=False,
+        help_text="Let agents call the deploy tool. Off = only you deploy.",
     )
 
-    # Remote server access (for inspection/debug only — no code changes on server)
+    # Remote server access for inspection (logs, status) — run by Khidr on the
+    # host through an allowlist; agents get no SSH keys.
     server_connection = models.CharField(
         max_length=256,
         blank=True,
         null=True,
-        help_text='SSH command to reach the server, e.g. "ssh myserver". '
-        "Agent uses this for log inspection / DB shell, never to edit code.",
+        help_text='SSH destination for the server_exec tool, e.g. "deploy@myserver" or a '
+        "Host alias from the orchestrator host's ~/.ssh/config.",
     )
     server_path = models.CharField(
         max_length=512,
@@ -55,21 +91,11 @@ class Project(models.Model):
         null=True,
         help_text='Absolute path to the project on the server, e.g. "/srv/myproject".',
     )
-
-    # Python environment paths for agents
-    pyenv_path = models.CharField(
-        max_length=512,
+    server_allowed_commands = models.TextField(
         blank=True,
-        null=True,
-        help_text='Path to pyenv version dir, e.g. "~/.pyenv/versions/khidr". '
-        "Leave blank for python-free projects (mobile/desktop apps, static sites); "
-        "provisioning will skip venv/pip steps and only git clone.",
-    )
-    python_path = models.CharField(
-        max_length=512,
-        blank=True,
-        null=True,
-        help_text='Full path to Python interpreter, e.g. "~/.pyenv/versions/khidr/bin/python".',
+        default="",
+        help_text="One command prefix per line that server_exec may run (blank = a built-in "
+        "read-only list: tail, cat, ls, grep, journalctl, systemctl status, docker ps, df, …).",
     )
 
     is_active = models.BooleanField(default=True)
@@ -105,33 +131,36 @@ class Project(models.Model):
         return self.name
 
 
-class GitRemote(models.Model):
-    project = models.ForeignKey(
-        Project,
-        on_delete=models.CASCADE,
-        related_name="git_remotes",
-    )
-    name = models.CharField(
-        max_length=64,
-        help_text="Remote name, e.g. origin or production",
-    )
-    url = models.CharField(
-        max_length=512,
-        help_text="Remote URL, e.g. ssh://myserver/srv/myproject",
-    )
-
-    class Meta:
-        ordering = ["id"]
-        unique_together = [["project", "name"]]
-
-    def __str__(self):
-        return f"{self.project.name}/{self.name}"
-
-
 class Agent(models.Model):
-    TYPE_CLAUDE = "claude-agent-sdk"
+    # The harness is the coding-agent CLI Khidr drives. Each runs headless in
+    # the task's sandbox and reaches Khidr's tools over HTTP MCP.
+    TYPE_CLAUDE = "claude"
+    TYPE_CODEX = "codex"
+    TYPE_GEMINI = "gemini"
+    TYPE_QWEN = "qwen"
+    TYPE_OPENCODE = "opencode"
     TYPE_CHOICES = [
-        (TYPE_CLAUDE, "Claude Agent SDK (Anthropic-compatible API)"),
+        (TYPE_CLAUDE, "Claude Code CLI (subscription or Anthropic-compatible API)"),
+        (TYPE_CODEX, "OpenAI Codex CLI (ChatGPT subscription or OpenAI-compatible API)"),
+        (TYPE_GEMINI, "Gemini CLI (Google login or API key)"),
+        (TYPE_QWEN, "Qwen Code CLI (Qwen login or OpenAI-compatible API)"),
+        (TYPE_OPENCODE, "opencode (any provider it supports)"),
+    ]
+
+    AUTH_API_KEY = "api_key"
+    AUTH_SUBSCRIPTION = "subscription"
+    AUTH_CHOICES = [
+        (AUTH_API_KEY, "API key (pay per token)"),
+        (AUTH_SUBSCRIPTION, "Subscription / CLI login"),
+    ]
+
+    SANDBOX_DEFAULT = ""
+    SANDBOX_DOCKER = "docker"
+    SANDBOX_LOCAL = "local"
+    SANDBOX_CHOICES = [
+        (SANDBOX_DEFAULT, "Default (KHIDR_SANDBOX)"),
+        (SANDBOX_DOCKER, "Docker: a fresh container per run"),
+        (SANDBOX_LOCAL, "Local: run on the host, no isolation"),
     ]
 
     ROLE_WORKER = "worker"
@@ -147,8 +176,19 @@ class Agent(models.Model):
     type = models.CharField(max_length=32, choices=TYPE_CHOICES)
     role = models.CharField(max_length=16, choices=ROLE_CHOICES, default=ROLE_WORKER)
 
-    # Anthropic Messages API-compatible endpoint (ANTHROPIC_BASE_URL), e.g.
-    # https://api.minimax.io/anthropic. Blank = api.anthropic.com.
+    auth = models.CharField(max_length=16, choices=AUTH_CHOICES, default=AUTH_API_KEY)
+    sandbox = models.CharField(max_length=16, choices=SANDBOX_CHOICES, blank=True, default="")
+    max_concurrency = models.PositiveSmallIntegerField(
+        default=1, help_text="How many tasks this agent may work on at once.",
+    )
+    cooldown_until = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Set when the provider reports a rate/usage limit; no dispatch until then.",
+    )
+
+    # API endpoint for auth=api_key: Anthropic-compatible for claude (e.g.
+    # https://api.minimax.io/anthropic), OpenAI-compatible for the others.
+    # Blank = the harness's own default.
     base_url = models.URLField(blank=True)
     model = models.CharField(max_length=128, blank=True)
     context_length = models.IntegerField(
@@ -158,7 +198,8 @@ class Agent(models.Model):
     api_key_env = models.CharField(
         max_length=64,
         blank=True,
-        help_text="Name of env var that holds the API key (not the key itself).",
+        help_text="Env var on the orchestrator host holding the API key — or, for claude with "
+        "auth=subscription, a token from `claude setup-token`. Not the key itself.",
     )
 
     # Summarizer fallback order: lower value = higher priority
@@ -175,6 +216,12 @@ class Agent(models.Model):
 
     def __str__(self):
         return self.slug
+
+    @property
+    def effective_sandbox(self) -> str:
+        from django.conf import settings
+
+        return self.sandbox or settings.KHIDR_SANDBOX
 
     @property
     def is_worker(self) -> bool:
@@ -400,3 +447,52 @@ class IgnoreRule(models.Model):
 
     def __str__(self):
         return self.pattern
+
+
+class Run(models.Model):
+    """One harness process working on a task. Its token authenticates the
+    agent's calls to Khidr's MCP endpoint for exactly this task."""
+
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="runs")
+    agent = models.ForeignKey(Agent, on_delete=models.SET_NULL, null=True, related_name="runs")
+    token_hash = models.CharField(max_length=64, unique=True)
+    asked_user = models.BooleanField(default=False)
+    started_at = models.DateTimeField(default=timezone.now)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    end_reason = models.CharField(max_length=32, blank=True, default="")
+
+    class Meta:
+        ordering = ["-started_at"]
+
+    def __str__(self):
+        return f"run {self.pk} task={self.task_id} agent={self.agent_id}"
+
+    @staticmethod
+    def hash_token(token: str) -> str:
+        import hashlib
+
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    @classmethod
+    def start(cls, task, agent) -> tuple["Run", str]:
+        import secrets
+
+        token = secrets.token_urlsafe(32)
+        run = cls.objects.create(task=task, agent=agent, token_hash=cls.hash_token(token))
+        return run, token
+
+    @classmethod
+    def active_for_token(cls, token: str) -> "Run | None":
+        if not token:
+            return None
+        return (
+            cls.objects.select_related("task", "task__project", "agent")
+            .filter(token_hash=cls.hash_token(token), ended_at__isnull=True)
+            .first()
+        )
+
+    def end(self, reason: str) -> None:
+        Run.objects.filter(pk=self.pk, ended_at__isnull=True).update(
+            ended_at=timezone.now(), end_reason=reason[:32]
+        )
+

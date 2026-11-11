@@ -15,6 +15,10 @@ from django.core.management.base import BaseCommand
 from core.models import Agent, Project
 
 
+# Older configs called the Claude harness by its SDK name.
+_TYPE_ALIASES = {"claude-agent-sdk": Agent.TYPE_CLAUDE}
+
+
 class Command(BaseCommand):
     help = "Load/upsert agents from agents.yaml into the DB."
 
@@ -45,7 +49,11 @@ class Command(BaseCommand):
 
             project_names = entry.get("projects", []) or []
             defaults = {
-                "type": entry.get("type", Agent.TYPE_CLAUDE),
+                "type": _TYPE_ALIASES.get(entry.get("type", Agent.TYPE_CLAUDE), entry.get("type")),
+                "auth": entry.get("auth", Agent.AUTH_API_KEY),
+                "sandbox": entry.get("sandbox", "") or "",
+                "max_concurrency": max(1, int(entry.get("max_concurrency", 1))),
+                "context_length": int(entry.get("context_length", 0) or 0),
                 "role": entry.get("role", Agent.ROLE_WORKER),
                 "base_url": entry.get("base_url", "") or "",
                 "model": entry.get("model", "") or "",
@@ -55,6 +63,9 @@ class Command(BaseCommand):
                 "is_active": bool(entry.get("is_active", True)),
             }
 
+            if defaults["type"] not in dict(Agent.TYPE_CHOICES):
+                self.stdout.write(self.style.ERROR(f"skipping {slug}: unknown type {defaults['type']!r}"))
+                continue
             agent, created = Agent.objects.update_or_create(slug=slug, defaults=defaults)
 
             if project_names:
@@ -70,7 +81,7 @@ class Command(BaseCommand):
                 agent.projects.clear()
 
             tag = "+" if created else "~"
-            self.stdout.write(f"{tag} {slug} ({agent.type}, role={agent.role})")
+            self.stdout.write(f"{tag} {slug} ({agent.type}/{agent.auth}, role={agent.role})")
 
         if prune:
             stale = Agent.objects.exclude(slug__in=seen)

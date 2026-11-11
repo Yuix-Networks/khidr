@@ -2,8 +2,8 @@
 Task → Agent assignment.
 
 Policy:
-- Serialization is **per-agent, across all projects**. An agent can own at
-  most one active Task at any time (anywhere). When that Task pauses
+- Concurrency is **per agent, across all projects**: an agent works on at
+  most `max_concurrency` tasks at once (anywhere). When a Task pauses
   (ask_user) or gets stuck (heartbeat timeout, requeue-cap, error-cap),
   the agent's `current_agent` slot clears and they're free to pick up the
   next Todo card — possibly in a different project.
@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, F, Q
 from django.utils import timezone
 
 from core.models import Agent, ChatMessage, Project, Task
@@ -34,53 +34,51 @@ log = logging.getLogger(__name__)
 
 
 def idle_worker_agents(project: Project, min_talent: int = 1):
-    """Worker agents in this project that are free and have talent >= min_talent.
+    """Worker agents in this project with a free slot and talent >= min_talent.
 
-    "Free" is measured globally: any in-progress task (in any project) with
-    `current_agent=agent` counts as busy, so agents never double-book across
-    projects. We restrict to status=in_progress so a stale current_agent
-    slot on a Done/Review/Todo task — left behind by a UI status change or
-    a session-finalize edge case — can't permanently lock the agent out of
-    dispatch. Callers are expected to additionally confirm
-    `_agent_container_ready()` before actually dispatching — we don't
-    include that in the queryset because it's an out-of-band docker ps
-    check per agent.
+    "Free" is measured globally: in-progress tasks in any project count
+    against the agent's `max_concurrency`. Only status=in_progress counts, so
+    a stale current_agent on a Done/Review/Todo task can't lock the agent out.
+    Agents resting after a rate/usage limit (`cooldown_until`) are skipped.
     """
-    busy_ids = Task.objects.filter(
-        current_agent__isnull=False,
-        status=Task.STATUS_IN_PROGRESS,
-    ).values_list("current_agent_id", flat=True)
+    now = timezone.now()
     return (
         project.agents.filter(is_active=True)
         .filter(role__in=[Agent.ROLE_WORKER, Agent.ROLE_BOTH])
         .filter(talent__gte=min_talent)
-        .exclude(pk__in=busy_ids)
+        .filter(Q(cooldown_until__isnull=True) | Q(cooldown_until__lte=now))
+        .annotate(active=Count(
+            "current_tasks", filter=Q(current_tasks__status=Task.STATUS_IN_PROGRESS)))
+        .filter(active__lt=F("max_concurrency"))
         .order_by("priority", "slug")
     )
 
 
 def _agent_is_busy(agent: Agent) -> bool:
-    """True if this agent holds a current_agent slot on an in-progress task."""
-    return Task.objects.filter(
-        current_agent=agent, status=Task.STATUS_IN_PROGRESS
-    ).exists()
+    """True if the agent has no free slot (or is cooling down)."""
+    if agent.cooldown_until and agent.cooldown_until > timezone.now():
+        return True
+    active = Task.objects.filter(current_agent=agent, status=Task.STATUS_IN_PROGRESS).count()
+    return active >= max(1, agent.max_concurrency)
 
 
-def _agent_container_ready(agent: Agent) -> bool:
-    """True if the agent's Docker container is up. Agents run in containers
-    for isolation; there is no host-side fallback, so a missing container
-    means we cannot dispatch."""
-    # Deferred import to avoid circular dependency at module load (docker_exec
-    # pulls core.models.Agent, which is imported here).
-    from core.services.agents.docker_exec import agent_container_if_running
+def _agent_sandbox_ready(agent: Agent) -> bool:
+    """True if the agent's sandbox can start runs (docker up + image built)."""
+    from core.services.agents.sandbox import sandbox_for
 
-    return agent_container_if_running(agent) is not None
+    try:
+        ok, why = sandbox_for(agent).available()
+    except ValueError as exc:
+        ok, why = False, str(exc)
+    if not ok:
+        log.info("agent %s: sandbox not ready: %s", agent.slug, why)
+    return ok
 
 
 def _pick_idle_worker(project: Project, min_talent: int) -> Agent | None:
-    """First agent from idle_worker_agents() whose container is running."""
+    """First agent from idle_worker_agents() whose sandbox is ready."""
     for a in idle_worker_agents(project, min_talent=min_talent):
-        if _agent_container_ready(a):
+        if _agent_sandbox_ready(a):
             return a
     return None
 
@@ -121,16 +119,9 @@ def dispatch_for_project(project: Project) -> Task | None:
                     task.assigned_agent.talent, task.complexity,
                 )
                 continue
-            if not _agent_container_ready(task.assigned_agent):
-                # Task is explicitly pinned to this agent but the container
-                # is not up — wait instead of falling back to another agent
-                # (would violate the assignment) or to the host (no
-                # isolation, no .pyenv venv parity).
-                log.info(
-                    "task %s assigned to %s but container 'khidr-agent-%s' "
-                    "is not running; holding task in Todo",
-                    task.pk, task.assigned_agent.slug, task.assigned_agent.slug,
-                )
+            if not _agent_sandbox_ready(task.assigned_agent):
+                # Pinned to this agent but its sandbox can't start runs —
+                # wait instead of handing it to another agent.
                 continue
             agent = task.assigned_agent
         else:

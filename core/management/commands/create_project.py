@@ -7,7 +7,7 @@ Project description is read straight from the DB at agent-context time
 (no project.md file needed).
 
 Optional flags:
-    --repo-path /path/to/repo         local git repo for this project
+    --repo-url git@github.com:org/repo.git   repository Khidr clones and pushes
     --server "ssh acme"          SSH command for read-only inspection
     --server-path /root/acme     path on the server (reference only)
     --deploy "make deploy"            deploy command agents run after push (default: none)
@@ -27,7 +27,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("name")
         parser.add_argument("description", nargs="?", default="")
-        parser.add_argument("--repo-path", default="")
+        parser.add_argument("--repo-url", default="")
         parser.add_argument("--server", default="", help='SSH command, e.g. "ssh acme"')
         parser.add_argument("--server-path", default="")
         parser.add_argument("--deploy", default="", help="Deploy command run after push (default: none)")
@@ -47,7 +47,7 @@ class Command(BaseCommand):
 
         defaults = {
             "description": opts["description"] or "",
-            "repo_path": opts["repo_path"] or "",
+            "repo_url": opts["repo_url"] or "",
             "server_connection": opts["server"] or "",
             "server_path": opts["server_path"] or "",
             "deploy_command": opts["deploy"] or "",
@@ -60,11 +60,11 @@ class Command(BaseCommand):
 
         self.stdout.write("")
         self.stdout.write("Next steps:")
-        if not project.repo_path:
-            self.stdout.write(f"  - Set repo_path in admin: /admin/core/project/{project.pk}/change/")
+        if not project.repo_url:
+            self.stdout.write(f"  - Set repo_url in admin: /admin/core/project/{project.pk}/change/")
         self.stdout.write("  - Attach one or more agents to this project")
         self.stdout.write(
             f"      python manage.py shell -c \"from core.models import *; "
-            f"Agent.objects.get(slug='elephant-alpha').projects.add(Project.objects.get(pk={project.pk}))\""
+            f"Agent.objects.get(slug='my-agent').projects.add(Project.objects.get(pk={project.pk}))\""
         )
         self.stdout.write("  - Open / in the browser; create tasks from the UI.")

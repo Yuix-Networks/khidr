@@ -1,37 +1,34 @@
 from django.contrib import admin
 
-from .models import Agent, ChatMessage, ChatSummary, GitRemote, IgnoreRule, Project, ProjectMemory, Task
-
-
-class GitRemoteInline(admin.TabularInline):
-    model = GitRemote
-    extra = 1
+from .models import Agent, ChatMessage, ChatSummary, IgnoreRule, Project, ProjectMemory, Run, Task
 
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "repo_path", "is_active", "glitchtip_project", "created_at")
-    list_filter = ("is_active",)
-    search_fields = ("name", "slug", "repo_path")
-    inlines = [GitRemoteInline]
+    list_display = ("name", "slug", "repo_url", "publish_mode", "is_active", "created_at")
+    list_filter = ("is_active", "publish_mode", "git_auth")
+    search_fields = ("name", "slug", "repo_url")
     fieldsets = (
         (None, {"fields": ("name", "slug", "description", "is_active")}),
-        ("Git / Deploy", {"fields": ("repo_path", "repo_url", "deploy_command", "glitchtip_project")}),
-        ("Monitoring", {"fields": ("uptime_monitors",)}),
-        ("Remote server", {"fields": ("server_connection", "server_path")}),
-        ("Python", {"fields": ("python_path", "pyenv_path")}),
+        ("Git", {"fields": ("repo_url", "default_branch", "publish_mode",
+                            "git_auth", "git_token_env", "git_ssh_key_path")}),
+        ("Deploy", {"fields": ("deploy_command", "allow_agent_deploy")}),
+        ("Server inspection", {"fields": ("server_connection", "server_path", "server_allowed_commands")}),
+        ("Monitoring", {"fields": ("glitchtip_project", "uptime_monitors")}),
     )
 
 
 @admin.register(Agent)
 class AgentAdmin(admin.ModelAdmin):
-    list_display = ("slug", "type", "role", "model", "context_length", "talent", "priority", "is_active")
-    list_filter = ("type", "role", "talent", "is_active")
+    list_display = ("slug", "type", "auth", "model", "sandbox", "max_concurrency",
+                    "talent", "priority", "cooldown_until", "is_active")
+    list_filter = ("type", "auth", "sandbox", "role", "talent", "is_active")
     search_fields = ("slug", "model", "base_url")
     filter_horizontal = ("projects",)
     fieldsets = (
         (None, {"fields": ("slug", "type", "role", "is_active", "talent", "priority", "projects")}),
-        ("OpenAI-compatible", {"fields": ("base_url", "model", "context_length", "api_key_env")}),
+        ("Model & credentials", {"fields": ("auth", "model", "base_url", "api_key_env", "context_length")}),
+        ("Execution", {"fields": ("sandbox", "max_concurrency", "cooldown_until")}),
     )
 
 
@@ -90,3 +87,10 @@ class IgnoreRuleAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "project")
     search_fields = ("pattern", "note")
     readonly_fields = ("hits", "last_hit_at")
+
+
+@admin.register(Run)
+class RunAdmin(admin.ModelAdmin):
+    list_display = ("id", "task", "agent", "started_at", "ended_at", "end_reason", "asked_user")
+    list_filter = ("end_reason", "agent")
+    readonly_fields = ("token_hash", "started_at", "ended_at")

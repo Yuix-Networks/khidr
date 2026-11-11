@@ -34,8 +34,8 @@ class AgentSession:
     def run(self) -> str:
         """Run to completion. Returns the Done.reason."""
         # Each session explicitly re-reads task + project + current_agent from
-        # the DB at startup, so admin tweaks to Project/Agent fields (repo_path,
-        # model, command, python_path, …) take effect on the next dispatch
+        # the DB at startup, so admin tweaks to Project/Agent fields (repo_url,
+        # model, sandbox, …) take effect on the next dispatch
         # without a daemon restart.
         try:
             task = (
@@ -178,10 +178,12 @@ class AgentSession:
         ).update(last_heartbeat=timezone.now())
 
     def _still_own_task(self) -> bool:
+        # Review/Done while we still hold the task means the agent itself
+        # finished it (set_status) and is wrapping up its last message.
         return Task.objects.filter(
             pk=self.task_id,
             current_agent_id=self._agent_id,
-            status=Task.STATUS_IN_PROGRESS,
+            status__in=[Task.STATUS_IN_PROGRESS, Task.STATUS_REVIEW, Task.STATUS_DONE],
         ).exists()
 
     # Silent re-queue cap. Agent's `done` event may fire while it is still
@@ -211,15 +213,17 @@ class AgentSession:
         "permissiondenied",
     )
 
-    # Setup errors: the agent's own environment is broken, so another attempt
-    # at the same run cannot fix it. The agent container's venv missing a
-    # module its code needs (the container's code was updated but its
-    # dependencies were not) is the common one — the container has to be
-    # re-synced.
+    # Setup errors: the agent's environment is broken (sandbox missing,
+    # CLI not installed, not logged in), so retrying the same run can't help.
     _SETUP_ERROR_PATTERNS = (
-        "no module named",
-        "modulenotfounderror",
-        "is not installed in this agent container",
+        "sandbox unavailable",
+        "could not start",
+        "is not set on the orchestrator host",
+        "workspace setup failed",
+        "not logged in",
+        "please run /login",
+        "command not found",
+        "executable file not found",
     )
 
     @classmethod
@@ -232,7 +236,7 @@ class AgentSession:
         if any(pat in low for pat in cls._PERMANENT_ERROR_PATTERNS):
             return "auth/permission error"
         if any(pat in low for pat in cls._SETUP_ERROR_PATTERNS):
-            return "agent container setup error"
+            return "agent setup error"
         return None
 
     def _finalize(self, task: Task, event: Done) -> None:
@@ -245,6 +249,14 @@ class AgentSession:
                 )
             else:
                 self._requeue_or_stop(task, event=event)
+
+        elif event.reason == "max_iterations":
+            # The run used up its turn budget mid-work. The workspace keeps
+            # its state, so another run can simply carry on.
+            self._requeue_or_stop(task, event=event)
+
+        elif event.reason == "rate_limited":
+            self._rest_agent(task, event)
 
         elif event.reason == "waiting_for_user":
             # Park the task: release the project-level in-progress lock so
@@ -264,6 +276,30 @@ class AgentSession:
         else:
             # error / max_iterations -> release and put back in Todo.
             self._handle_error_done(task, event)
+
+    def _rest_agent(self, task: Task, event: Done) -> None:
+        """The provider reported a rate or usage limit (a subscription window
+        ran out, a 429 that outlasted the CLI's retries). That isn't the
+        task's fault: rest the agent and put the task back for whoever is
+        free — or for this agent once it is rested, if the task is pinned."""
+        from core.models import Agent
+
+        seconds = int(getattr(settings, "KHIDR_RATE_LIMIT_COOLDOWN_SECONDS", 1800))
+        until = timezone.now() + timedelta(seconds=seconds)
+        Agent.objects.filter(pk=self.agent.pk).update(cooldown_until=until)
+        Task.objects.filter(pk=task.pk).update(
+            status=Task.STATUS_TODO, current_agent=None, last_heartbeat=None,
+        )
+        ChatMessage.objects.create(
+            task=task,
+            role=ChatMessage.ROLE_SYSTEM,
+            agent=self.agent,
+            content=(
+                f"[orchestrator] {self.agent.slug} hit a rate/usage limit; it rests until "
+                f"{until:%H:%M} and the task is back in Todo. {(event.message or '')[:300]}"
+            ),
+        )
+        log.warning("agent %s rate-limited; cooling down %ss", self.agent.slug, seconds)
 
     def _handle_error_done(self, task: Task, event: Done) -> None:
         """

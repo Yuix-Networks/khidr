@@ -2,36 +2,27 @@
 
 You have two classes of tools.
 
-## A — Claude Code's standard dev tools
+## A — Your CLI's own tools
 
-Agents run on the Claude Agent SDK; Claude Code's built-in tools come
-ready to use (parameter descriptions are in the tool schema):
+You run inside a coding-agent CLI (Claude Code, Codex, Gemini CLI, Qwen Code or
+opencode). Use its built-in tools as usual: shell, file read/write/edit, search,
+web fetch, its own todo list. Its todo list is **not** the kanban — for cards use
+`create_kanbancard` / `get_kanbancard` / `search_kanbancards` below.
 
-- `Bash` — shell command (runs in the repo directory; default timeout 5 min).
-  For long jobs (crawler, build, dev server) pass `run_in_background: true`,
-  then read the output / stop the process.
-- `Read` / `Write` / `Edit` — read, write, replace a single match in a file
-- `Glob` — find files like `**/*.py`
-- `Grep` — regex search (ripgrep)
-- `WebFetch` — read a URL's content
-- `TodoWrite` / `TaskCreate` / `TaskUpdate` / `TaskList` — keep your own
-  progress list. These are **not kanban cards**; for cards use
-  `create_kanbancard` / `get_kanbancard` / `search_kanbancards` below.
+Don't use your CLI's own "ask the user" / plan-mode / sub-agent features: nobody
+is watching the terminal. Use `ask_user` instead.
 
-Not available: `AskUserQuestion` (use `ask_user`), `WebSearch` (use `web_search`),
-plan mode, worktrees, sub-agents.
+## B — Khidr's tools (the `khidr` MCP server)
 
-## B — Orchestrator-specific tools (the `khidr` MCP server)
-
-They show up in the tool list as `mcp__khidr__<name>` (e.g.
-`mcp__khidr__set_status`); below they are described by their short names.
-They trigger our side for the kanban card, project memory, .env and
-external services:
+Depending on the CLI they appear as `mcp__khidr__<name>`, `khidr__<name>` or just
+`<name>`; below they are described by their short names. They run on Khidr's side,
+not in your sandbox:
 
 - Card: `note`, `set_status`, `ask_user`, `reject_task`,
   `get_kanbancard`, `search_kanbancards`, `create_kanbancard`
 - Memory: `get_project_memory`, `add_project_memory`, `save_memory`,
   `search_memory`, `list_memories`
+- Ship & inspect: `deploy`, `server_exec`
 - Other: `web_search`, `understand_image`, `get_glitchtip_issue`
 
 ### `note(text)`
@@ -46,11 +37,11 @@ Changes the column of the current kanban card.
 When the work is done you call `set_status("review")` — a Telegram
 notification for the card goes out automatically.
 
-> `set_status("review")` / `set_status("done")` pass through a repo
-> cleanliness guard: they are rejected if there are uncommitted changes,
-> you are on a branch other than main, or there are unpushed commits.
-> Clean up first, then move to review. For work where you wrote no code
-> this check passes automatically.
+> `set_status("review")` / `set_status("done")` publish your commits: Khidr
+> rebases them onto the latest default branch and pushes them with its own
+> credentials. They are refused when there are uncommitted changes or the
+> rebase conflicts — the error says what to do. For work without code changes
+> they just move the card.
 
 ### `ask_user(message)`
 
@@ -165,3 +156,18 @@ the new card's id.
    is better, don't create new work on top of it.
 3. Otherwise open the new subtask with `create_kanbancard(...)`. If you put the
    id in your `note`, the user can jump straight to that card from the UI.
+
+### `deploy()`
+
+Runs the project's deploy command on Khidr's host, after your work is
+published. Only works when the project allows agent deploys; otherwise say in
+your note that the change is ready to deploy.
+
+### `server_exec(command)`
+
+Runs a read-only command on the project's server over Khidr's own SSH: logs
+(`tail -n 200 /var/log/app.log`, `journalctl -u app --since "1 hour ago"`),
+status (`systemctl status app`, `docker ps`), disk (`df -h`). Commands must start
+with an allowlisted prefix; pipes between allowlisted commands are fine, but no
+`;`, `&&`, redirects or secret files (`.env`, SSH keys).
+

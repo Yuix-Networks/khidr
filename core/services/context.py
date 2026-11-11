@@ -41,30 +41,29 @@ def build_system_prompt(task: Task) -> str:
     )
 
     deploy = (proj.deploy_command or "").strip()
+    has_repo = bool((proj.repo_url or "").strip())
     env_lines = [
-        f"- Local: {proj.repo_path or '(not set — ask user)'}",
-        f"- Deploy: {deploy or '(none — this project has no deploy step)'}",
+        "- Your working directory is the task's own workspace"
+        + (f": a clone of {proj.repo_url}." if has_repo else " (this project has no repository)."),
     ]
-    if proj.python_path:
-        env_lines.append(f"- Python: {proj.python_path}")
-    if proj.pyenv_path:
-        env_lines.append(f"- pyenv: {proj.pyenv_path}")
+    if has_repo:
+        env_lines += [
+            "- Commit your work locally. You cannot push: when you call "
+            "set_status('review'), Khidr rebases your commits onto the latest "
+            "default branch and pushes them with its own credentials.",
+            "- `git fetch origin` works (read-only) if you need the latest upstream.",
+        ]
+    if deploy and proj.allow_agent_deploy:
+        env_lines.append(f"- Deploy: call the `deploy` tool after set_status('review') (runs `{deploy}`).")
+    elif deploy:
+        env_lines.append("- Deploy: the user deploys; don't try to deploy yourself.")
     if proj.server_connection:
         env_lines.append(
-            f"- Remote: {proj.server_connection} (path: {proj.server_path or 'not set'})"
+            "- Server: inspect it with the `server_exec` tool (read-only commands"
+            + (f", project at {proj.server_path}" if proj.server_path else "")
+            + "). You have no SSH access of your own."
         )
-
-    local = proj.repo_path or "(project path)"
-    env_lines.append("")
-    env_lines.append(
-        f"⚠️ Shell cwd persists across calls. File tools resolve against `{local}`. "
-        f"Use absolute paths or `cd {local} && <cmd>`. "
-        + (
-            f"Never edit server files directly — ship with `{deploy}`."
-            if deploy
-            else "Never edit server files directly."
-        )
-    )
+    env_lines.append("- Never edit files on servers directly.")
 
     parts.append("# Environment\n\n" + "\n".join(env_lines) + "\n")
 
@@ -122,15 +121,12 @@ def build_messages(task: Task, seed_if_empty: bool = True) -> list[dict]:
             messages.append({"role": "user", "content": f"[system] {m.content}"})
 
     if not messages and seed_if_empty:
-        deploy = (task.project.deploy_command or "").strip()
-        ship = f"commit + push + `{deploy}`" if deploy else "commit + push"
         messages.append(
             {
                 "role": "user",
                 "content": (
-                    "Take this card. Start by following the flow in Shared Memory: "
-                    f"first a short plan, then work on main, test, {ship}, "
-                    "move it to Review."
+                    "Take this card. Follow the flow in Shared Memory: a short plan, "
+                    "do the work, test it, commit, then set_status('review')."
                 ),
             }
         )

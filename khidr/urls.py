@@ -1,11 +1,14 @@
 from django.contrib import admin
 from django.urls import include, path
 
+from core.mcp import mcp_endpoint
 from core.api import api_login, list_memories, create_memory, delete_memory, search_memories
 from core.views import glitchtip_webhook, uptime_kuma_webhook
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("mcp", mcp_endpoint),
+    path("mcp/", mcp_endpoint, name="mcp"),
     path("", include("chat.urls")),
     path("api/login/", api_login, name="api_login"),
     path("api/projects/<int:project_id>/memories/", list_memories, name="list_memories"),

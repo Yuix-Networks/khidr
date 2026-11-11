@@ -212,7 +212,7 @@ class RejectTaskToolTests(TestCase):
         self.assertEqual(self.task.status, Task.STATUS_DONE)
         rule = IgnoreRule.objects.get(pattern=r"No module named 'pyotp'")
         self.assertEqual(rule.project, self.project)
-        self.assertTrue(ChatMessage.objects.filter(task=self.task, content__contains="reddedildi").exists())
+        self.assertTrue(ChatMessage.objects.filter(task=self.task, content__contains="rejected").exists())
 
     def test_bad_pattern_is_refused_and_card_stays(self):
         for pattern in ("(", "TemplateDoesNotExist"):

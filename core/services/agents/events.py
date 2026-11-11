@@ -25,6 +25,7 @@ class Done:
         "finished",
         "waiting_for_user",
         "max_iterations",
+        "rate_limited",
         "error",
     ]
     message: str = ""

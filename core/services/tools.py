@@ -15,13 +15,12 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import httpx
 from django.db.models import Q
 
-from core.models import Agent, ChatMessage, IgnoreRule, Task
+from core.models import Agent, ChatMessage, IgnoreRule, Run, Task
 from core.services.telegram import notify_task
 
 log = logging.getLogger(__name__)
@@ -77,14 +76,6 @@ def _minimax_request(path: str, payload: dict) -> dict:
     return resp.json()
 
 
-# True when this Toolbox is running inside an agent's Docker container.
-# False when running in the orchestrator daemon on the khidr host.
-# The distinction matters for git state checks in `set_status`:
-# host-side Toolbox must peek at the agent's container workspace,
-# not the orchestrator's stale clone.
-_IN_CONTAINER = os.environ.get("KHIDR_IN_CONTAINER") == "1"
-
-
 @dataclass
 class ToolResult:
     """What a tool returns."""
@@ -94,11 +85,13 @@ class ToolResult:
 
 
 class Toolbox:
-    """Task-level tool bag, exposed to agents as the `khidr` MCP server."""
+    """Task-level tool bag, served to agents by the `khidr` MCP endpoint
+    (core/mcp.py). Runs on the orchestrator host, never in the sandbox."""
 
-    def __init__(self, task: Task):
+    def __init__(self, task: Task, run: Run | None = None):
         self.task = task
         self.project = task.project
+        self.run = run
 
     # ------------------------------------------------------------------ specs
 
@@ -117,7 +110,11 @@ class Toolbox:
             _spec(
                 "set_status",
                 "Change this task's status column. Call with 'review' when "
-                "the work is complete and ready for user review.",
+                "the work is complete and ready for user review. Moving to "
+                "review/done publishes your commits: Khidr rebases them onto "
+                "the latest default branch and pushes with its own "
+                "credentials (you cannot push yourself). It refuses while the "
+                "workspace has uncommitted changes or the rebase conflicts.",
                 {
                     "status": (
                         "string",
@@ -323,6 +320,27 @@ class Toolbox:
                 },
                 required=["issue_url"],
             ),
+            _spec(
+                "deploy",
+                "Run the project's deploy command on the orchestrator host, "
+                "after your work is published (set_status('review') first). "
+                "Only available when the project allows agent deploys. "
+                "Returns the command's exit code and output.",
+                {},
+                required=[],
+            ),
+            _spec(
+                "server_exec",
+                "Run a read-only inspection command on the project's server "
+                "(logs, service status, disk, processes) — e.g. "
+                "`tail -n 200 /var/log/app.log`, `systemctl status app`, "
+                "`docker ps`. Commands must start with an allowlisted prefix; "
+                "pipes between allowlisted commands are fine, but no `;`, `&&`, "
+                "redirects or reading secret files. You have no SSH access "
+                "yourself; this tool is the only way to look at the server.",
+                {"command": ("string", "The command to run on the server.")},
+                required=["command"],
+            ),
         ]
 
     # ------------------------------------------------------------------ dispatch
@@ -365,10 +383,29 @@ class Toolbox:
                 detail={"error": "unknown_status"},
             )
 
+        published = ""
         if raw in (Task.STATUS_REVIEW, Task.STATUS_DONE):
-            guard = self._check_repo_clean_on_main()
-            if guard is not None:
-                return guard
+            from core.services.workspace import GitError, publish
+
+            try:
+                result = publish(self.task)
+            except GitError as exc:
+                return ToolResult(
+                    content=f"Refusing set_status: publishing failed: {exc}",
+                    detail={"error": "publish_failed"},
+                )
+            if not result.ok:
+                return ToolResult(
+                    content=f"Refusing set_status: {result.message}",
+                    detail={"error": "publish_refused"},
+                )
+            published = result.message
+            if result.pushed:
+                ChatMessage.objects.create(
+                    task=self.task,
+                    role=ChatMessage.ROLE_SYSTEM,
+                    content=f"📤 **published**\n\n```\n{published}\n```",
+                )
 
         Task.objects.filter(pk=self.task.pk).update(status=raw)
         self.task.status = raw
@@ -380,7 +417,7 @@ class Toolbox:
                 log.warning("telegram notify (review) failed: %s", exc)
 
         return ToolResult(
-            content=f"status set to '{raw}'",
+            content=f"status set to '{raw}'" + (f"\n{published}" if published else ""),
             detail={"status": raw},
         )
 
@@ -405,9 +442,15 @@ class Toolbox:
                     detail={"error": "bad_regex"},
                 )
 
-        guard = self._check_repo_clean_on_main()
-        if guard is not None:
-            return guard
+        from core.services.workspace import git, workspace_path
+
+        ws = workspace_path(self.task)
+        if (ws / ".git").exists() and git(["status", "--porcelain"], cwd=ws).stdout.strip():
+            return ToolResult(
+                content="Refusing reject_task: the workspace has uncommitted changes. "
+                "Discard them (`git checkout -- . && git clean -fd`) or commit and use set_status.",
+                detail={"error": "dirty_repo"},
+            )
 
         if pattern:
             IgnoreRule.objects.create(
@@ -418,11 +461,11 @@ class Toolbox:
         ChatMessage.objects.create(
             task=self.task,
             role=ChatMessage.ROLE_SYSTEM,
-            content=f"🚫 **reddedildi**\n\n{reason}"
-            + (f"\n\nIgnore rule eklendi: `{pattern}`" if pattern else ""),
+            content=f"🚫 **rejected**\n\n{reason}"
+            + (f"\n\nIgnore rule added: `{pattern}`" if pattern else ""),
         )
         try:
-            notify_task(self.task, f"🚫 Reddedildi: {reason}")
+            notify_task(self.task, f"🚫 Rejected: {reason}")
         except Exception as exc:  # noqa: BLE001
             log.warning("telegram notify (reject) failed: %s", exc)
         return ToolResult(
@@ -847,12 +890,17 @@ class Toolbox:
         msg = args["message"]
         Task.objects.filter(pk=self.task.pk).update(waiting_for_user=True)
         self.task.waiting_for_user = True
+        if self.run is not None:
+            Run.objects.filter(pk=self.run.pk).update(asked_user=True)
         try:
-            notify_task(self.task, "⏸ Agent soru soruyor", body=msg)
+            notify_task(self.task, "⏸ The agent has a question", body=msg)
         except Exception as exc:  # noqa: BLE001
             log.warning("telegram notify (ask_user) failed: %s", exc)
         return ToolResult(
-            content="message sent; your turn ends now, loop resumes when user replies",
+            content=(
+                "Message sent to the user. End your turn now: stop calling tools "
+                "and finish your reply. You will be resumed with the user's answer."
+            ),
             detail={"message": msg, "waiting_for_user": True},
         )
 
@@ -977,144 +1025,51 @@ class Toolbox:
 
         return ToolResult(content="\n".join(lines), detail={"issue_id": issue_id})
 
-    # ---- helpers ----------------------------------------------------------
-
-    def _run_git_in_agent_repo(
-        self, argv: list[str], repo: Path
-    ) -> subprocess.CompletedProcess | None:
-        """Run `git *argv` against the agent's working tree.
-
-        Returns None if we're on the host but the agent has no running
-        container — the guard treats that as "can't verify" and fails safe.
-
-        Two execution paths:
-        - In-container ( Toolbox running inside khidr-agent-<slug>):
-          just run locally; cwd is the agent's own workspace.
-        - On-host (Toolbox running in the orchestrator daemon): host's own /home/khidr/workspace/<project> is a stale
-          clone (agent never touches it); route through `docker exec` so we
-          inspect the right filesystem.
-        """
-        if _IN_CONTAINER:
-            return subprocess.run(
-                ["git", *argv],
-                cwd=repo,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-
-        # Lazy imports — docker_exec pulls core.models back in, which is
-        # fine but keeps the module graph shallow for simple callers.
-        from core.services.agents.docker_exec import (
-            agent_container_if_running,
-            wrap_with_docker_exec,
-        )
-
-        agent = self.task.current_agent or self.task.assigned_agent
-        container = agent_container_if_running(agent) if agent else None
-        if container is None:
-            return None
-
-        cmd = wrap_with_docker_exec(
-            ["git", *argv],
-            container=container,
-            cwd=str(repo),
-            interactive=False,
-        )
-        return subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-
-    def _deploy_hint(self) -> str:
-        """' (+ `<deploy_command>`)' for the project, or '' when it has none."""
-        deploy = (self.task.project.deploy_command or "").strip()
-        return f" (+ `{deploy}`)" if deploy else ""
-
-    def _default_branch_in_agent_repo(self, repo: Path) -> str | None:
-        """Resolve the repo's actual default branch (main, master, …).
-
-        Reads origin's HEAD symref rather than assuming a name, so projects
-        that default to `master` (or anything else) aren't punished by a
-        guard written with `main` in mind.
-        """
-        ref = self._run_git_in_agent_repo(
-            ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], repo
-        )
-        if ref is None or ref.returncode != 0:
-            return None
-        value = ref.stdout.strip()
-        if value.startswith("origin/"):
-            value = value[len("origin/"):]
-        return value or None
-
-    def _check_repo_clean_on_main(self) -> ToolResult | None:
-        """Return a ToolResult (error) if the repo isn't clean on its default branch."""
-        if not self.project.repo_path:
-            return None
-        repo = Path(self.project.repo_path).expanduser()
-        # The .git check runs against whatever filesystem we're on; that's
-        # fine because both host and container layouts have the repo at
-        # the same path (bind-mount or real clone).
-        if not (repo / ".git").exists() and _IN_CONTAINER:
-            return None
-
-        dirty = self._run_git_in_agent_repo(["status", "--porcelain"], repo)
-        if dirty is None:
+    def _tool_deploy(self, args: dict) -> ToolResult:
+        command = (self.project.deploy_command or "").strip()
+        if not command:
+            return ToolResult(content="This project has no deploy command.", detail={"error": "no_deploy"})
+        if not self.project.allow_agent_deploy:
             return ToolResult(
-                content=(
-                    "Refusing set_status: can't reach the agent's container "
-                    "to verify its working tree is clean. The container for "
-                    "this task's agent isn't running."
-                ),
-                detail={"error": "no_container"},
+                content="Agent deploys are disabled for this project; the user deploys. "
+                "Mention in your note that the change is ready to deploy.",
+                detail={"error": "deploy_disabled"},
             )
-        if dirty.stdout.strip():
-            return ToolResult(
-                content=(
-                    "Refusing set_status: repo has uncommitted changes.\n"
-                    f"git status --porcelain:\n{dirty.stdout[:2000]}\n\n"
-                    f"Commit and push{self._deploy_hint()} — or discard the changes "
-                    "— and then try set_status again."
-                ),
-                detail={"error": "dirty_repo", "status": dirty.stdout[:400]},
-            )
+        from core.services.workspace import git_env, workspace_path
 
-        default_branch = self._default_branch_in_agent_repo(repo) or "main"
-
-        branch = self._run_git_in_agent_repo(["rev-parse", "--abbrev-ref", "HEAD"], repo)
-        current = (branch.stdout.strip() if branch else "") or ""
-        if current and current != default_branch:
-            return ToolResult(
-                content=(
-                    f"Refusing set_status: current branch is '{current}', not "
-                    f"'{default_branch}'. Agents work directly on {default_branch}; "
-                    f"`git checkout {default_branch}`, make sure there's nothing "
-                    "stranded, and try again."
-                ),
-                detail={"error": "not_on_default_branch", "branch": current, "default_branch": default_branch},
-            )
-
-        ahead = self._run_git_in_agent_repo(
-            ["rev-list", "--count", "@{u}..HEAD"], repo
-        )
+        cwd = workspace_path(self.task)
         try:
-            n_unpushed = int((ahead.stdout.strip() if ahead else "") or "0")
-        except ValueError:
-            n_unpushed = 0
-        if n_unpushed > 0:
-            return ToolResult(
-                content=(
-                    f"Refusing set_status: {n_unpushed} local commit(s) on "
-                    f"{default_branch} are not pushed. `git push`{self._deploy_hint()} "
-                    "before calling set_status again."
-                ),
-                detail={"error": "unpushed", "ahead": n_unpushed},
+            proc = subprocess.run(
+                command, shell=True, cwd=cwd if cwd.exists() else None,
+                env=git_env(self.project), capture_output=True, text=True, timeout=1800,
             )
+        except subprocess.TimeoutExpired:
+            return ToolResult(content="deploy timed out after 30 minutes", detail={"error": "timeout"})
+        output = (proc.stdout + ("\n[stderr]\n" + proc.stderr if proc.stderr.strip() else ""))[-12000:]
+        ChatMessage.objects.create(
+            task=self.task,
+            role=ChatMessage.ROLE_SYSTEM,
+            content=f"🚀 **deploy** `{command}` → exit {proc.returncode}",
+        )
+        return ToolResult(
+            content=f"exit code {proc.returncode}\n{output}",
+            detail={"error": "deploy_failed"} if proc.returncode else {"exit": 0},
+        )
 
-        return None
+    def _tool_server_exec(self, args: dict) -> ToolResult:
+        from core.services import server_exec
+
+        command = args.get("command") or ""
+        try:
+            code, output = server_exec.run(command, self.project)
+        except server_exec.ServerExecDenied as exc:
+            return ToolResult(content=f"Denied: {exc}", detail={"error": "denied"})
+        ChatMessage.objects.create(
+            task=self.task,
+            role=ChatMessage.ROLE_SYSTEM,
+            content=f"🔎 **server_exec** `{command}` → exit {code}",
+        )
+        return ToolResult(content=f"exit code {code}\n{output}", detail={"exit": code})
 
 
 # ---------------------------------------------------------------------------

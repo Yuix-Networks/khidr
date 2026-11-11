@@ -1,0 +1,63 @@
+# Khidr sandbox: one image for every agent run.
+#
+# Each run gets a fresh, throw-away container (`docker run --rm`) with:
+#   /workspace      the task's git checkout (read-write)
+#   /khidr/run      the run's config files: MCP settings, prompt (read-only)
+#   /home/khidr     the agent's home: its CLI login lives here
+#   <git cache>     the project's bare cache, read-only, at its host path
+# No SSH keys, no database credentials, no Khidr code.
+#
+# Build:
+#   docker build -t khidr-sandbox:latest -f docker/Dockerfile.sandbox docker/
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    TZ=UTC
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl git gnupg less jq unzip zip xz-utils \
+        build-essential pkg-config libssl-dev libffi-dev libpq-dev \
+        python3 python3-venv python3-pip python3-dev \
+        ripgrep fd-find sudo procps \
+    && ln -s /usr/bin/fdfind /usr/local/bin/fd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 22 for the CLIs.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# uv: fast Python installs and any Python version a project needs.
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+
+# The harnesses. Pin versions with build args if you need reproducible images.
+ARG CLAUDE_CODE_VERSION=latest
+ARG CODEX_VERSION=latest
+ARG GEMINI_CLI_VERSION=latest
+ARG QWEN_CODE_VERSION=latest
+ARG OPENCODE_VERSION=latest
+RUN npm install -g \
+        @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+        @openai/codex@${CODEX_VERSION} \
+        @google/gemini-cli@${GEMINI_CLI_VERSION} \
+        @qwen-code/qwen-code@${QWEN_CODE_VERSION} \
+        opencode-ai@${OPENCODE_VERSION} \
+    && npm cache clean --force
+
+# Non-root user. On Linux hosts Khidr runs containers with --user <your uid>,
+# so files in the bind mounts stay yours; HOME is set explicitly either way.
+RUN userdel -r ubuntu 2>/dev/null || true \
+    && useradd -m -u 1000 -s /bin/bash khidr \
+    && echo 'khidr ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/khidr \
+    && chmod 0440 /etc/sudoers.d/khidr \
+    && chmod 0777 /home/khidr \
+    && git config --system --add safe.directory '*'
+
+USER khidr
+ENV HOME=/home/khidr \
+    PATH=/home/khidr/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    IS_SANDBOX=1
+WORKDIR /workspace

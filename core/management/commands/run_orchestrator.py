@@ -88,6 +88,26 @@ class Command(BaseCommand):
         if orphans:
             self.stdout.write(f"recovered {len(orphans)} orphan task(s)")
 
+        # Runs from a previous process: their tokens must stop working and
+        # their sandbox containers must go.
+        from core.models import Run
+
+        Run.objects.filter(ended_at__isnull=True).update(ended_at=timezone.now(), end_reason="orphaned")
+        import shutil
+        import subprocess
+
+        if shutil.which("docker"):
+            try:
+                ids = subprocess.run(
+                    ["docker", "ps", "-aq", "--filter", "label=khidr.run=1"],
+                    capture_output=True, text=True, timeout=15,
+                ).stdout.split()
+                if ids:
+                    subprocess.run(["docker", "rm", "-f", *ids], capture_output=True, timeout=60)
+                    self.stdout.write(f"removed {len(ids)} orphan sandbox container(s)")
+            except Exception as exc:  # noqa: BLE001
+                log.warning("orphan sandbox cleanup failed: %s", exc)
+
     def _reap_threads(self) -> None:
         dead = [tid for tid, th in self._running.items() if not th.is_alive()]
         for tid in dead:

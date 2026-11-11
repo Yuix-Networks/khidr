@@ -1,72 +1,60 @@
 # General Rules
 
-Every agent reads this file at the start of every task. Project-independent, stable rules of behavior live here.
-**Do not open branches.** Agents always work on `main`.
+Every agent reads this at the start of every task. Project-independent, stable rules live here.
 
-1. Read the task (title, description, chat history)
-2. Plan if needed and write the plan to the chat — ask the user for approval on large or ambiguous work, start right away on small, clear work
-3. Always update the repo first, because several AI agents work on this project: `git pull origin main`
-4. Do the work — **directly on the main branch**:
-   - edit → test → `git add -A && git commit -m "…"` → `git push` → run the project's deploy command (see `Deploy` under Environment; if it is empty, the project has no deploy step)
-5. Test your own work; write tests if needed
-6. When the work is done, move the task to Review with `set_status("review")` and leave a short summary with `note`
-7. If the work is not done or something is broken, keep fixing it; do not move it to Review
+## Flow
 
-> **Note:** `set_status("review")` checks that the repo is clean. The call
-> is rejected if there are uncommitted changes, you are on a branch other
-> than main, or there are unpushed commits. Clean up and push first, then
-> move to review. For work where you wrote no code this check passes,
-> because the repo is already clean.
+1. Read the task (title, description, chat history).
+2. Plan if needed and post the plan with `note`. Ask the user (`ask_user`) before large or ambiguous work; start right away on small, clear work.
+3. Do the work in your working directory (the task's own git checkout).
+4. Test it (unit tests, a smoke run, lint or build — whatever fits the work).
+5. Commit: `git add -A && git commit -m "…"`. Several small commits are fine.
+6. Call `set_status("review")` and leave a short summary with `note`.
+7. If the work isn't done or something is broken, keep going; don't move it to Review.
 
-## Testing policy
+## Git: you commit, Khidr publishes
 
-- Test every piece of work. Choose how to test based on the kind of work (unit tests, manual smoke check, lint, build)
-- Writing new test files is not mandatory; do not write them unless the work calls for it
-- Do not `git push` before the tests pass
+- You have **no push access and no SSH keys**. Don't try `git push`, and don't
+  ask for credentials.
+- `set_status("review")` publishes your work: Khidr rebases your commits onto the
+  latest default branch and pushes them (or pushes a task branch, depending on
+  the project). It refuses — and tells you why — when:
+  - the workspace has uncommitted changes → commit or discard them;
+  - your commits conflict with upstream → `git fetch origin && git rebase origin/<branch>`,
+    resolve, commit, call `set_status` again.
+- `git fetch origin` works (read-only) when you need the latest upstream code.
+- For work without code changes, `set_status("review")` just moves the card.
 
-## Getting stuck / asking for help
+## Asking the user
 
-- If you need help from the user, **call the `ask_user(message)` tool**. Writing
-  plain text and stopping is not enough — without the tool call the orchestrator
-  does not know you are waiting; it quietly ends the session and starts
-  another round. When `ask_user` is called the orchestrator:
-  1. puts the task in `waiting_for_user=True` and does not dispatch it
-     again (until the user answers),
-  2. sends the user a Telegram notification (with the chat URL).
-- If the work cannot be done, say why with `ask_user` as well — writing a
-  note to the chat and stopping is not enough on its own.
-- After 30 minutes without an answer the orchestrator triggers you again — if you are stuck, say so honestly.
+- If you need the user, **call `ask_user(message)`**. Writing plain text and
+  stopping is not enough — without the tool call Khidr doesn't know you're waiting.
+  `ask_user` ends your run, marks the card as waiting and notifies the user; you'll
+  be resumed with their answer.
+- If the work can't be done, say why with `ask_user` too.
 
-## Working environment: Docker container
+## Your environment
 
-Your code runs inside a Docker container named `khidr-agent-<slug>`
-(your slug), on the host that runs the Khidr orchestrator.
-
-- Home, user and path layout match the host: user `khidr` (uid=1000),
-  projects under `/home/khidr/workspace/`, virtualenvs under
-  `/home/khidr/.pyenv/versions/<venv>/`. Don't worry about the
-  container/host split when writing commands — paths are the same on both sides.
-- Mounts:
-  - `/home/khidr/workspace/` — your own read-write area. Other agents cannot
-    touch it (each agent gets its own `workspace-agents/<slug>/` folder mounted).
-  - `/home/khidr/.ssh/` — read-only access to the host's SSH keys.
-    `ssh <server>`, `git clone git@...` and the deploy command all work.
-  - `/home/khidr/workspace/khidr/` — the orchestrator's own clone that your
-    worker runs from. Do not change anything there; if something needs to
-    change, open a Khidr card (`create_kanbancard`).
-- The `khidr` hostname resolves to the host (the Docker gateway) from inside the container.
-  `ssh khidr` reaches the host machine.
+- You run inside a sandbox: usually a fresh Docker container per run, with your
+  working directory mounted at `/workspace`. Anything outside the working
+  directory is gone after the run; the working directory itself persists for the
+  whole task, so uncommitted work survives between runs.
+- Installed: git, Python 3 with `uv` and `pip`, Node.js, ripgrep, build tools.
+  Create virtualenvs inside the working directory (e.g. `uv venv .venv`) and keep
+  them out of commits (`.gitignore`).
+- Servers: you can't SSH anywhere. To look at a project's server (logs, service
+  status, disk) use the `server_exec` tool — read-only commands from an allowlist.
+- Deploys: only via the `deploy` tool, and only when the project allows it.
+  Otherwise the user deploys.
 
 ## Shell / path rules
 
-- The shell starts in the `Local` project path from Environment. File tools (`Read`, `Write`, `Edit`, `Glob`, `Grep`) need absolute paths — use the project path from Environment.
-- ⚠️ `Bash` state (cwd) **persists** across calls. If you ran `cd subdir/` in an earlier command, the next `./manage.py` looks there, not at the project root.
-  - Prefer **absolute paths** for scripts you use often: `<python> <local>/manage.py check`.
-  - If a command needs a specific directory, wrap it: `cd <local> && <cmd>`.
-- Reach the server with the `ssh <connection>` command from Environment. Never `scp` or edit files directly on the server — code goes local → commit → push → deploy command.
+- The shell's working directory persists across calls. Prefer absolute paths, or
+  `cd <dir> && <cmd>` when a command needs a specific directory.
+- Never edit files on servers directly.
 
-## Server / deploy rules
+## Testing policy
 
-- Do not edit files directly on the server. No `scp`. No manual service restarts.
-- Always: local commit → push → the project's deploy command.
-- SSH to the server is for inspection/debugging only (reading logs, DB shell). **Never** for code changes.
+- Test every piece of work; pick the kind of test that fits.
+- New test files aren't mandatory; write them when the work calls for it.
+- Don't call `set_status("review")` before the tests pass.

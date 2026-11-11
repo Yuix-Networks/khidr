@@ -1,30 +1,64 @@
-# Agent havuzu. Her agent birden fazla projeye atanabilir.
-# type: claude-agent-sdk  (base_url = Anthropic Messages API-compatible endpoint)
-# role: worker (default) | summarizer | both
+# Khidr agent pool. Load with: python manage.py load_agents
+#
+# An agent = a harness (the coding CLI) + credentials + a model.
+#
+#   type:    claude | codex | gemini | qwen | opencode
+#   auth:    subscription  — the CLI's own login (cheapest for heavy use):
+#                            claude: a `claude setup-token` token in api_key_env,
+#                                    or `python manage.py agent_login <id>`
+#                            codex/gemini/qwen/opencode: `python manage.py agent_login <id>`
+#            api_key       — pay per token; api_key_env names the env var holding the key,
+#                            base_url points at any compatible endpoint
+#                            (Anthropic-compatible for claude, OpenAI-compatible otherwise)
+#   sandbox: docker (default, a fresh container per run) | local (on this host, no isolation)
+#   max_concurrency: how many tasks this agent may work on at once
+#   role:    worker (default) | summarizer | both
+#   talent:  1-5; an agent only takes tasks with complexity <= talent
+#   projects: project names this agent works on
 
 agents:
-  - id: local-qwen
-    type: claude-agent-sdk
-    base_url: http://localhost:8000      # llama.cpp llama-server serves /v1/messages
-    model: qwen2.5-coder-32b
-    api_key_env: LOCAL_API_KEY   # opsiyonel
-    role: both
-    priority: 1                  # summarizer fallback order (lower = preferred)
+  # Claude Code on a Claude Pro/Max subscription (token from `claude setup-token`).
+  - id: claude-max
+    type: claude
+    auth: subscription
+    api_key_env: CLAUDE_CODE_OAUTH_TOKEN
+    model: sonnet
+    max_concurrency: 2
+    talent: 5
     projects: [example]
 
-  - id: openrouter-claude
-    type: claude-agent-sdk
-    base_url: https://openrouter.ai/api
-    model: anthropic/claude-sonnet-4
-    api_key_env: OPENROUTER_API_KEY
-    role: worker
+  # Codex CLI on a ChatGPT subscription (log in once with agent_login).
+  - id: codex-plus
+    type: codex
+    auth: subscription
+    talent: 4
     projects: [example]
 
+  # Qwen Code with its own login.
+  - id: qwen
+    type: qwen
+    auth: subscription
+    talent: 3
+    projects: [example]
+
+  # MiniMax through Claude Code (Anthropic-compatible API, pay per token).
   - id: minimax
-    type: claude-agent-sdk
+    type: claude
+    auth: api_key
     base_url: https://api.minimax.io/anthropic
-    model: MiniMax-M3
+    model: MiniMax-M2
     api_key_env: MINIMAX_API_KEY
+    context_length: 200000
     role: both
     priority: 2
+    projects: [example]
+
+  # Any OpenAI-compatible endpoint through opencode (here: a local llama.cpp server).
+  - id: local-qwen
+    type: opencode
+    auth: api_key
+    base_url: http://localhost:8080/v1
+    model: qwen3-coder-30b
+    sandbox: local
+    talent: 2
     projects: [example]
