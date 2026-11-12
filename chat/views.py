@@ -103,8 +103,14 @@ def create_project_view(request):
 
     api_token = secrets.token_hex(32)
     project = Project.objects.create(
-        name=name, description=description, is_active=True, api_token=api_token
+        name=name, description=description, is_active=True, api_token=api_token,
+        repo_url=(request.POST.get("repo_url") or "").strip(),
     )
+    # Every active worker agent can take the new project's cards; narrow it
+    # down in the admin.
+    from core.models import Agent
+
+    project.agents.set(Agent.objects.filter(is_active=True))
     return JsonResponse({"ok": True, "id": project.pk, "url": f"/projects/{project.pk}/"})
 
 

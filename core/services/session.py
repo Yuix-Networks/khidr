@@ -213,6 +213,15 @@ class AgentSession:
         "permissiondenied",
     )
 
+    # Out of credit: retrying spends nothing but time until someone tops up.
+    _BILLING_ERROR_PATTERNS = (
+        "402",
+        "insufficient balance",
+        "payment required",
+        "credit balance is too low",
+        "billing",
+    )
+
     # Setup errors: the agent's environment is broken (sandbox missing,
     # CLI not installed, not logged in), so retrying the same run can't help.
     _SETUP_ERROR_PATTERNS = (
@@ -235,6 +244,8 @@ class AgentSession:
         low = (detail or "").lower()
         if any(pat in low for pat in cls._PERMANENT_ERROR_PATTERNS):
             return "auth/permission error"
+        if any(pat in low for pat in cls._BILLING_ERROR_PATTERNS):
+            return "out of credit"
         if any(pat in low for pat in cls._SETUP_ERROR_PATTERNS):
             return "agent setup error"
         return None

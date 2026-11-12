@@ -573,6 +573,10 @@ KHIDR_DATA_DIR = Path(env("KHIDR_DATA_DIR", str(BASE_DIR / "data"))).expanduser(
 # per run) or "local" (run the CLI directly on this host — no isolation).
 KHIDR_SANDBOX = env("KHIDR_SANDBOX", "docker")
 KHIDR_SANDBOX_IMAGE = env("KHIDR_SANDBOX_IMAGE", "khidr-sandbox:latest")
+# Docker network for sandboxes (Compose: "khidr", so they reach http://web:8000)
+# and the uid:gid they run as (blank = automatic, see sandbox.sandbox_user).
+KHIDR_SANDBOX_NETWORK = env("KHIDR_SANDBOX_NETWORK", "")
+KHIDR_SANDBOX_USER = env("KHIDR_SANDBOX_USER", "")
 
 # How a sandboxed agent reaches this Khidr instance (the /mcp/ endpoint).
 # From Docker, localhost/127.0.0.1 is rewritten to host.docker.internal.

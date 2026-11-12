@@ -1,0 +1,81 @@
+# Khidr with Docker Compose. Start with ./install.sh (first time) or
+#   docker compose up -d
+#
+# Services: db (PostgreSQL), web (UI, webhooks, MCP endpoint), orchestrator
+# (dispatch + agent runs). Agent sandboxes are sibling containers the
+# orchestrator starts through the host's Docker socket, on the `khidr`
+# network, so they reach the MCP endpoint at http://web:8000.
+
+name: khidr
+
+x-app: &app
+  image: khidr:latest
+  build: .
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    PG_HOST: db
+    PG_PORT: "5432"
+    KHIDR_SANDBOX: docker
+    KHIDR_SANDBOX_NETWORK: khidr
+    KHIDR_INTERNAL_URL: http://web:8000
+    KHIDR_DATA_DIR: ${KHIDR_DATA_DIR:?run ./install.sh or set KHIDR_DATA_DIR in .env}
+  volumes:
+    # The data dir is mounted at the same absolute path as on the host: the
+    # orchestrator hands these paths to `docker run -v`, which resolves them
+    # on the host.
+    - ${KHIDR_DATA_DIR}:${KHIDR_DATA_DIR}
+    - ./agents.yaml:/app/agents.yaml:ro
+    # Git / server_exec credentials for the orchestrator (deploy keys,
+    # ~/.ssh/config, known_hosts). Never mounted into agent sandboxes.
+    - ./secrets/ssh:/root/.ssh:ro
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_NAME:-khidr}
+      POSTGRES_USER: ${PG_USER:-khidr}
+      POSTGRES_PASSWORD: ${PG_PASS:?set PG_PASS in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-khidr} -d ${PG_NAME:-khidr}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    <<: *app
+    command: web
+    ports:
+      - "${KHIDR_BIND:-127.0.0.1}:${KHIDR_PORT:-8000}:8000"
+
+  orchestrator:
+    <<: *app
+    command: orchestrator
+    volumes:
+      - ${KHIDR_DATA_DIR}:${KHIDR_DATA_DIR}
+      - ./agents.yaml:/app/agents.yaml:ro
+      - ./secrets/ssh:/root/.ssh:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # Not a service: `docker compose build` (or ./install.sh) builds the agent
+  # sandbox image with it.
+  sandbox-image:
+    image: ${KHIDR_SANDBOX_IMAGE:-khidr-sandbox:latest}
+    build:
+      context: docker
+      dockerfile: Dockerfile.sandbox
+    profiles: ["build"]
+
+volumes:
+  pgdata:
+
+networks:
+  default:
+    name: khidr

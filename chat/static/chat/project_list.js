@@ -11,6 +11,7 @@
   const submit = document.querySelector('[data-js="p-submit"]');
   const name = document.querySelector('[data-js="p-name"]');
   const desc = document.querySelector('[data-js="p-desc"]');
+  const repo = document.querySelector('[data-js="p-repo"]');
   const err = document.querySelector('[data-js="p-err"]');
 
   // --- quick filter: "/" focuses, Enter opens the first visible match ----
@@ -66,6 +67,7 @@
       const body = new URLSearchParams();
       body.append("name", n);
       body.append("description", desc.value.trim());
+      if (repo) body.append("repo_url", repo.value.trim());
       const r = await fetch("/projects/create/", {
         method: "POST", body,
         headers: { "X-CSRFToken": csrf },

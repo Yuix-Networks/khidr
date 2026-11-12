@@ -185,10 +185,11 @@ class DockerSandbox(Sandbox):
         ]
         for path in launch.readonly_mounts:
             argv += ["-v", f"{path}:{path}:ro"]
-        if sys.platform.startswith("linux"):
-            # Files the agent writes into the bind mounts stay owned by the
-            # user running Khidr.
-            argv += ["--user", f"{os.getuid()}:{os.getgid()}"]
+        if settings.KHIDR_SANDBOX_NETWORK:
+            argv += ["--network", settings.KHIDR_SANDBOX_NETWORK]
+        user = sandbox_user()
+        if user:
+            argv += ["--user", user]
         argv += os.environ.get("KHIDR_SANDBOX_DOCKER_ARGS", "").split()
         for key, value in launch.env.items():
             argv += ["-e", f"{key}={value}"]
@@ -197,10 +198,33 @@ class DockerSandbox(Sandbox):
         return argv
 
     def popen(self, launch: Launch) -> subprocess.Popen:
+        user = sandbox_user()
+        if user and os.getuid() == 0:
+            # Khidr itself runs as root (the Docker Compose setup): hand the
+            # workspace and the agent's home to the sandbox user, or the agent
+            # can't write files that Khidr's git operations created.
+            for path in (launch.workspace, launch.home):
+                subprocess.run(["chown", "-R", user, str(path)], capture_output=True, timeout=300)
         return _popen(self.docker_argv(launch), {**os.environ}, None)
 
     def stop(self, launch: Launch) -> None:
         subprocess.run(["docker", "rm", "-f", launch.name], capture_output=True, timeout=30)
+
+
+def sandbox_user() -> str | None:
+    """uid:gid the sandbox runs as, or None for the image's own user.
+
+    KHIDR_SANDBOX_USER wins. Otherwise on Linux, a non-root Khidr runs
+    sandboxes as itself so bind-mounted files stay its own; a root Khidr
+    (inside Docker Compose) uses the image's `khidr` user (1000).
+    """
+    if settings.KHIDR_SANDBOX_USER:
+        return settings.KHIDR_SANDBOX_USER
+    if not sys.platform.startswith("linux"):
+        return None
+    if os.getuid() == 0:
+        return "1000:1000"
+    return f"{os.getuid()}:{os.getgid()}"
 
 
 def sandbox_for(agent: Agent) -> Sandbox:

@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+!.env.example
+data
+staticfiles
+agents.yaml
+**/__pycache__
+**/*.pyc
+.venv
+.claude
+.python-version

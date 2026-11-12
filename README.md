@@ -63,38 +63,57 @@ sandbox on the task's own git checkout, commits, and moves the card to
 
 More detail: [docs/architecture.md](docs/architecture.md).
 
-## Quick start (development)
+## Install (Docker)
 
-Requirements: Python 3.12+, PostgreSQL, git; Docker for the `docker` sandbox.
+Requirements: Docker with Compose v2. On macOS, Docker Desktop.
 
 ```bash
 git clone https://github.com/Yuix-Networks/khidr.git && cd khidr
+./install.sh
+```
+
+`install.sh` creates `.env` with generated secrets, builds the Khidr image and
+the agent sandbox image, asks for a web password, and starts PostgreSQL, the
+web app and the orchestrator. The UI is at http://localhost:8000; the Django
+admin (git credentials, agents) at `/admin/` as user `admin`.
+
+Then:
+
+1. **Agents.** Edit `agents.yaml`, put their API keys or `claude setup-token`
+   tokens in `.env`, and load them:
+   ```bash
+   docker compose exec web python manage.py load_agents
+   docker compose up -d        # recreate so .env changes apply
+   ```
+   Log subscription CLIs (Codex, Gemini, Qwen) in once:
+   ```bash
+   docker compose exec -it orchestrator python manage.py agent_login <agent>
+   ```
+2. **Projects.** "+ New project" on the board, with the repository URL. Khidr
+   fetches and pushes with the credentials in `./secrets/ssh` (a deploy key,
+   `known_hosts`, an ssh `config`) or an HTTPS token env var (set per project in
+   the admin). These never reach the agents.
+3. **Cards.** Create a card; an agent picks it up within a few seconds.
+
+Update with `git pull && ./install.sh`. Logs: `docker compose logs -f orchestrator`.
+
+The orchestrator container mounts the Docker socket to start sandbox
+containers, which is root-equivalent on the host: run Khidr on a machine you
+trust it with. Set `KHIDR_PORT` / `KHIDR_BIND` in `.env` to change where the
+UI listens (default `127.0.0.1:8000`).
+
+## Development without Docker
+
+Requirements: Python 3.12+, PostgreSQL, git; Docker if you want the `docker`
+sandbox.
+
+```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env              # fill in DJANGO_SECRET_KEY and the PG_* settings
-python manage.py set_password     # paste the printed hash into .env
+cp .env.example .env              # DJANGO_SECRET_KEY, PG_*, WEB_PASSWORD_HASH (manage.py set_password)
 python manage.py migrate
-```
-
-Build the sandbox image (or set `KHIDR_SANDBOX=local` to run the CLIs on this
-machine instead — no isolation):
-
-```bash
-docker build -t khidr-sandbox:latest -f docker/Dockerfile.sandbox docker/
-```
-
-Create a project in the admin (`/admin/`, with `repo_url`), then describe your
-agents:
-
-```bash
-cp agents.yaml.example agents.yaml   # edit: agents, models, projects
-python manage.py load_agents
-python manage.py agent_login <agent> # once per subscription agent
-```
-
-Run it:
-
-```bash
+docker build -t khidr-sandbox:latest -f docker/Dockerfile.sandbox docker/   # or KHIDR_SANDBOX=local
+cp agents.yaml.example agents.yaml && python manage.py load_agents
 python manage.py runserver           # web UI + MCP endpoint on :8000
 python manage.py run_orchestrator    # in another terminal
 ```

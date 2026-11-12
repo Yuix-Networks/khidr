@@ -73,6 +73,9 @@ class PermanentErrorTests(SimpleTestCase):
         self.assertEqual(self._reason("sandbox unavailable: image not built"), "agent setup error")
         self.assertEqual(self._reason("could not start codex: No such file"), "agent setup error")
 
+    def test_out_of_credit(self):
+        self.assertEqual(self._reason("API Error: 402 insufficient balance (1008)"), "out of credit")
+
     def test_transient_error_is_not_permanent(self):
         self.assertIsNone(self._reason("connection reset by peer"))
 

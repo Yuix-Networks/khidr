@@ -23,7 +23,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from core.models import Agent
-from core.services.agents.sandbox import DockerSandbox, sandbox_for
+from core.services.agents.sandbox import DockerSandbox, sandbox_for, sandbox_user
 
 LOGIN_COMMANDS = {
     Agent.TYPE_CLAUDE: ["claude", "setup-token"],
@@ -70,8 +70,13 @@ class Command(BaseCommand):
                 "-e", f"HOME={DockerSandbox.HOME}",
                 "-e", "NO_BROWSER=true",
             ]
-            if hasattr(os, "getuid") and os.uname().sysname == "Linux":
-                argv += ["--user", f"{os.getuid()}:{os.getgid()}"]
+            user = sandbox_user()
+            if user:
+                if os.getuid() == 0:
+                    import subprocess
+
+                    subprocess.run(["chown", "-R", user, str(home)], capture_output=True)
+                argv += ["--user", user]
             argv += [settings.KHIDR_SANDBOX_IMAGE, *command]
             self.stdout.write(f"login home: {home}")
         else:

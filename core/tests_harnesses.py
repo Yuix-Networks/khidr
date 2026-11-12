@@ -215,6 +215,27 @@ class SandboxTests(SimpleTestCase):
         self.assertNotIn(".ssh", joined)
         self.assertEqual(argv[-2:], ["claude", "-p"])
 
+    @override_settings(KHIDR_SANDBOX_NETWORK="khidr", KHIDR_SANDBOX_USER="1000:1000")
+    def test_compose_network_and_user(self):
+        launch = Launch(argv=["codex"], env={}, workspace=Path("/w"), run_dir=Path("/r"),
+                        home=Path("/h"), name="khidr-run-1")
+        argv = DockerSandbox().docker_argv(launch)
+        self.assertEqual(argv[argv.index("--network") + 1], "khidr")
+        self.assertEqual(argv[argv.index("--user") + 1], "1000:1000")
+
+    def test_sandbox_user_defaults(self):
+        from core.services.agents import sandbox
+
+        with mock.patch.object(sandbox.sys, "platform", "darwin"):
+            self.assertIsNone(sandbox.sandbox_user())
+        with mock.patch.object(sandbox.sys, "platform", "linux"), \
+                mock.patch.object(sandbox.os, "getuid", return_value=0):
+            self.assertEqual(sandbox.sandbox_user(), "1000:1000")
+        with mock.patch.object(sandbox.sys, "platform", "linux"), \
+                mock.patch.object(sandbox.os, "getuid", return_value=1001), \
+                mock.patch.object(sandbox.os, "getgid", return_value=1001):
+            self.assertEqual(sandbox.sandbox_user(), "1001:1001")
+
     def test_docker_reaches_the_host_via_host_docker_internal(self):
         sb = DockerSandbox()
         self.assertEqual(sb.reachable_url("http://127.0.0.1:8000/mcp/"), "http://host.docker.internal:8000/mcp/")
